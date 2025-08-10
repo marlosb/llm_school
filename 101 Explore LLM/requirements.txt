@@ -1,0 +1,2 @@
+"trl>=0.20.0" 
+transformers
