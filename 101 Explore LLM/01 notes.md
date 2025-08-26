@@ -1,4 +1,453 @@
 
+---
+
+Grok, I'm starting to learn about LLMs. I'm using distilgpt2 as a study case. I printed model details, see below. Could you please explain it to me?
+
+```
+GPT2LMHeadModel(
+  (transformer): GPT2Model(
+    (wte): Embedding(50257, 768)
+    (wpe): Embedding(1024, 768)
+    (drop): Dropout(p=0.1, inplace=False)
+    (h): ModuleList(
+      (0-5): 6 x GPT2Block(
+        (ln_1): LayerNorm((768,), eps=1e-05, elementwise_affine=True)
+        (attn): GPT2Attention(
+          (c_attn): Conv1D(nf=2304, nx=768)
+          (c_proj): Conv1D(nf=768, nx=768)
+          (attn_dropout): Dropout(p=0.1, inplace=False)
+          (resid_dropout): Dropout(p=0.1, inplace=False)
+        )
+        (ln_2): LayerNorm((768,), eps=1e-05, elementwise_affine=True)
+        (mlp): GPT2MLP(
+          (c_fc): Conv1D(nf=3072, nx=768)
+          (c_proj): Conv1D(nf=768, nx=3072)
+          (act): NewGELUActivation()
+          (dropout): Dropout(p=0.1, inplace=False)
+        )
+      )
+    )
+    (ln_f): LayerNorm((768,), eps=1e-05, elementwise_affine=True)
+  )
+  (lm_head): Linear(in_features=768, out_features=50257, bias=False)
+)
+```
+
+---
+
+Let’s break down the architecture of the **distilgpt2** model, which is a distilled version of GPT-2, a transformer-based language model. The model details you provided describe the **GPT2LMHeadModel**, which is designed for language modeling tasks (predicting the next token in a sequence). I'll explain each component clearly and concisely.
+
+## Top-Level Structure: `GPT2LMHeadModel`
+
+The model consists of two main parts:
+
+1. **Transformer**: The core of the model, responsible for processing input tokens and generating contextual representations.
+2. **LM Head**: A linear layer that maps the transformer's output to the vocabulary size for predicting the next token.
+
+---
+
+## 1. Transformer (`GPT2Model`)
+
+The transformer is the backbone of the model, processing input sequences to produce contextualized embeddings. It consists of several subcomponents:
+
+### a. Token Embeddings (`wte`)
+
+- **What it does**: Converts each input token (word or subword) into a 768-dimensional vector.
+- **Vocabulary size**: 50,257 tokens (based on the GPT-2 tokenizer).
+- **Embedding dimension**: 768, meaning each token is represented as a 768-dimensional vector.
+
+### b. Positional Embeddings (`wpe`)
+
+- **What it does**: Adds positional information to each token, since transformers don’t inherently understand token order.
+- **Sequence length**: Supports up to 1,024 tokens in a sequence (the maximum context length).
+- **Embedding dimension**: Also 768, matching the token embeddings.
+
+### c. Dropout (`drop`)
+
+- **What it does**: Applies dropout with a probability of 0.1 (10%) to prevent overfitting by randomly zeroing out some values during training.
+- **Inplace=False**: The operation doesn’t modify the input tensor directly.
+
+### d. Transformer Blocks (`h`)
+
+- The model has **6 transformer blocks** (layers), which is fewer than the 12 in standard GPT-2, reflecting the "distilled" nature of **distilgpt2**.
+- Each `GPT2Block` processes the input sequentially and consists of:
+
+    - **LayerNorm (`ln_1`)**: Normalizes the input to the attention mechanism, stabilizing training. It operates on 768-dimensional vectors with a small epsilon (1e-05) for numerical stability.
+
+    - **Attention Mechanism (`attn`)**:
+        - **Multi-Head Self-Attention**: The core mechanism allowing the model to weigh the importance of different tokens in the sequence.
+        - **`c_attn`: Conv1D(nf=2304, nx=768)**: A 1D convolution that projects the input into query, key, and value vectors for attention (2304 = 768 × 3 for query, key, value).
+        - **`c_proj`: Conv1D(nf=768, nx=768)**: Projects the attention output back to 768 dimensions.
+        - **Dropout**: Applied to attention weights (`attn_dropout`) and the output (`resid_dropout`), both with p=0.1.
+
+    - **LayerNorm (`ln_2`)**: Another normalization layer before the feed-forward network.
+
+    - **Feed-Forward Network (`mlp`)**:
+        - **`c_fc`: Conv1D(nf=3072, nx=768)**: Expands the 768-dimensional input to 3072 dimensions (4× expansion, typical in transformers).
+        - **`c_proj`: Conv1D(nf=768, nx=3072)**: Projects back to 768 dimensions.
+        - **Activation (`act`)**: Uses `NewGELUActivation`, a variant of GELU (Gaussian Error Linear Unit) for non-linearity.
+        - **Dropout**
+
+---
+
+## 2. LM Head
+
+- **`lm_head`: Linear(in_features=768, out_features=50257, bias=False)**
+    - This is a linear layer that maps the 768-dimensional transformer output to the vocabulary size (50,257 tokens).
+    - It produces the logits for each token in the vocabulary, allowing the model to predict the next token in the sequence.
+
+---
+
+**Summary Table**
+
+| Component                  | Purpose / Details                                                 |
+|----------------------------|-------------------------------------------------------------------|
+| Token Embeddings (`wte`)   | 50257 tokens, 768-dimensional vector per token                    |
+| Positional Embeddings (`wpe`)| 1024 positions, 768-dimensional                                  |
+| Transformer Blocks         | 6 layers, each with LayerNorm, Attention, Feed-Forward            |
+| Attention (`attn`)         | Multi-head self-attention, 768 × 3 dimensions for Q/K/V           |
+| MLP Feed-Forward (`mlp`)   | Expands to 3072, projects back to 768, GELU activation            |
+| LM Head                    | Linear layer for predicting next token (vocab size 50257)         |
+
+---
+
+If you have more questions about specific parts, feel free to ask!
+
+Here is your content, converted to Markdown:
+
+---
+
+**Dropout**: Applied with p=0.1.
+
+---
+
+### e. Final LayerNorm (`ln_f`):
+
+- Normalizes the output of the last transformer block before passing it to the language modeling head.
+
+---
+
+## 2. Language Modeling Head (`lm_head`):
+
+`Linear(in_features=768, out_features=50257, bias=False)`
+
+- **What it does**: Takes the 768-dimensional output from the transformer and maps it to a probability distribution over the vocabulary (50,257 tokens).
+- **No bias**: The linear layer doesn’t use a bias term, which is typical in some transformer designs to reduce parameters.
+
+---
+
+## Key Characteristics of `distilgpt2`
+
+- **Distillation**: `distilgpt2` is a smaller, faster version of GPT-2, with 6 layers instead of 12, making it more computationally efficient while retaining much of GPT-2’s performance.
+- **Parameters**: Approximately 82 million parameters (much fewer than GPT-2’s 124 million for the smallest variant).
+- **Architecture**: Follows the standard GPT-2 design with token and positional embeddings, multiple transformer blocks (attention + feed-forward), and a language modeling head.
+- **Use case**: Designed for tasks like text generation, where it predicts the next token in a sequence based on the context.
+
+---
+
+## How It Works (High-Level)
+
+1. **Input**:  
+   A sequence of tokens (e.g., words or subwords) is converted to 768-dimensional embeddings using `wte` and `wpe`.
+
+2. **Transformer Blocks**:  
+   The embeddings pass through 6 transformer blocks, each applying self-attention (to capture relationships between tokens) and a feed-forward network (to process each token’s representation).
+
+3. **Output**:  
+   The final transformer output is normalized and passed to the `lm_head`, which produces probabilities over the vocabulary for the next token.
+
+---
+
+## Why This Matters for Learning LLMs
+
+- **Token Embeddings**: Learn how tokens are represented as vectors.
+- **Positional Embeddings**: Understand how transformers handle sequence order.
+- **Attention Mechanism**: The core of transformers, enabling context-aware processing.
+- **LayerNorm and Dropout**: Techniques to stabilize training and prevent overfitting.
+- **Feed-Forward Networks**: Add non-linearity and capacity to the model.
+- **Distillation**: `distilgpt2` shows how to make models smaller and faster while preserving performance, a key concept in practical LLM deployment.
+
+---
+
+If you have specific questions about any component or want to dive deeper into how `distilgpt2` is trained or used, let me know!
+
+---
+
+**Q:** Nice, now explain me the wte layer. Is it training along with other layers or is it trained before? Is backpropagation used?
+
+---
+
+### The `wte` Layer in `distilgpt2`
+
+The `wte` layer in the `distilgpt2` model, shown as `Embedding(50257, 768)`, is the **token embedding layer**. Let’s dive into what it does, how it’s trained, and whether backpropagation is used:
+
+#### What is the `wte` Layer?
+
+- **Purpose**:  
+  The `wte` (word token embedding) layer converts each input token (from a vocabulary of 50,257 tokens) into a 768-dimensional vector. These vectors represent tokens (words or subwords) in a continuous space, capturing semantic information.
+
+- **Structure**:  
+  It’s an embedding matrix of size `[50257, 768]`, where each row corresponds to a token’s vector representation. For a given token ID, the layer looks up or computes the corresponding 768-dimensional vector.
+
+- **Role in the Model**:  
+  This layer is the first step in processing input tokens, transforming discrete token IDs into dense vectors that the transformer can process. These embeddings are combined with positional embeddings (`wpe`) to form the input to the transformer blocks.
+
+#### Is the `wte` Layer Trained Along with Other Layers?
+
+Yes, the `wte` layer is **trained simultaneously** with all other layers of the model during the training process. Here’s how it works:
+
+- **Initialization**:  
+  The embedding matrix is initialized with random values (or sometimes pre-trained values if starting from a checkpoint).
+
+- **Training Process**:  
+  During training, the model optimizes all parameters, including the `wte` matrix, to minimize the loss function (typically cross-entropy loss for language modeling, as `distilgpt2` predicts the next token).
+
+- **No Pre-Training in Isolation**:  
+  The `wte` layer is not trained separately before the rest of the model. It learns in tandem with the transformer blocks, positional embeddings, and the language modeling head. The embeddings improve as the model learns to predict tokens based on context, capturing semantic relationships (e.g., “dog” and “puppy” may end up with similar embeddings).
+
+- **Distillation Context**:  
+  Since `distilgpt2` is a distilled version of GPT-2, its `wte` layer may inherit initial weights from a larger GPT-2 model during distillation. However, during fine-tuning or further training, it continues to be updated alongside other layers.
+
+#### Is Backpropagation Used?
+
+Yes, **backpropagation** is used to train the `wte` layer, just like the rest of the model. Here’s how it applies:
+
+- **Forward Pass**:  
+  For an input sequence of token IDs, the `wte` layer maps each ID to its corresponding 768-dimensional vector. These embeddings pass through the transformer blocks, and the final output is used to compute the loss (e.g., how well the model predicts the next token).
+
+- **Backward Pass**:  
+  During backpropagation, gradients of the loss are computed with respect to all model parameters, including the `wte` matrix. These gradients indicate how much each embedding vector should change to reduce the loss.
+
+---
+
+Let me know if you’d like more technical details or Python code examples regarding embeddings and backpropagation!
+
+Here’s your conversation converted from HTML to Markdown, with information preserved and formatting simplified for clarity:
+
+---
+
+### Gradient Update
+
+An optimizer (e.g., Adam) uses these gradients to update the `wte` matrix entries, adjusting the embeddings to better capture token relationships. This process is identical to how other layers (e.g., attention weights, feed-forward networks) are updated.
+
+---
+
+### Tied Weights
+
+In `distilgpt2` (and GPT-2), the `wte` layer is often **tied** to the `lm_head` (the final linear layer). This means the same embedding matrix is used for both input token embeddings and output token predictions, reducing the number of parameters. Gradients from the output layer also flow back to the `wte` layer, reinforcing its training.
+
+---
+
+## Key Points About `wte` Training
+
+- **End-to-End Training**: The `wte` layer is part of the end-to-end training process, not pre-trained separately. It learns to map tokens to vectors that are useful for the downstream task (language modeling).
+- **Backpropagation**: Gradients flow through the entire model, including `wte`, ensuring that embeddings are updated based on the model’s performance on the training data.
+- **Semantic Learning**: As training progresses, the `wte` layer captures semantic and syntactic patterns (e.g., similar words have closer vectors in the embedding space).
+- **Distillation Impact**: In `distilgpt2`, the `wte` layer may have been initialized from a larger GPT-2 model and fine-tuned during distillation to mimic the teacher model’s behavior, but it’s still trained with backpropagation alongside other layers.
+
+---
+
+## Why This Matters
+
+Understanding the `wte` layer is key to grasping how LLMs like `distilgpt2` represent language:
+
+- **Token Representation**: The `wte` layer is the model’s first step in turning discrete tokens into a format the transformer can process.
+- **Joint Training**: Training `wte` with the rest of the model ensures embeddings are tailored to the task and context.
+- **Backpropagation**: This is the mechanism that allows the model to learn meaningful embeddings, making it a cornerstone of neural network training.
+
+---
+
+If you want to explore further (e.g., how to inspect the `wte` embeddings, visualize them, or understand their role in distillation), let me know!
+
+---
+
+## Question
+
+> The vocabulary size is the input size for wte layer. How does it affect computing performance in both training and inference? I understand that having a larger vocabulary will lead to fewer tokens to represent the same text. At the same time a larger vocabulary size would increase the number of parameters that needs to be learned during training. How can I find the optimum size?
+
+---
+
+## Answer
+
+The vocabulary size in the `wte` (word token embedding) layer of `distilgpt2`, which is 50,257, directly impacts the computational performance during both training and inference. It also influences the trade-off between token efficiency (fewer tokens to represent text) and model complexity (more parameters to learn). Let’s break down how vocabulary size affects performance and how to approach finding an optimal size.
+
+### How Vocabulary Size Affects Computing Performance
+
+#### 1. Impact on the `wte` Layer
+
+- **Parameters in `wte`**: The `wte` layer is an embedding matrix of size `[vocab_size, embedding_dim]`. For `distilgpt2`, this is `[50257, 768]`, resulting in `50257 × 768 ≈ 38.6 million` parameters. A larger vocabulary increases this number linearly, e.g., doubling the vocabulary to 100,514 would double the `wte` parameters to ~77.2 million.
+- **Tied Weights**: In `distilgpt2`, the `lm_head` (language modeling head) shares the same weights as `wte`, so the vocabulary size also affects the output layer. A larger vocabulary increases the output dimensionality of `lm_head`, which is a linear layer mapping from 768 to vocab_size.
+
+#### 2. Training Performance
+
+- **Memory Usage**: A larger vocabulary increases the memory footprint of the `wte` matrix and `lm_head`. For example, with 50,257 tokens and 768 dimensions, the `wte` matrix requires ~154 MB (assuming 4 bytes per parameter). Doubling the vocabulary doubles this memory demand, which can strain GPU/TPU memory.
+- **Computational Cost**: During training, backpropagation computes gradients for all `wte` parameters. A larger vocabulary means more parameters to update, increasing computation time and memory for gradient storage.
+- **Loss Computation**: The `lm_head` produces a probability distribution over the vocabulary for each token in the sequence. A larger vocabulary increases the size of this distribution, making the softmax operation (used to compute probabilities) more computationally expensive. For a sequence of length (T), the softmax cost scales with `T × vocab_size`.
+- **Token Efficiency Trade-Off**: A larger vocabulary reduces the number of tokens needed to represent text (e.g., "unhappiness" might be one token instead of "un" + "happi" + "ness"). This reduces sequence length, which lowers the computational cost of the transformer layers (attention and feed-forward), as their complexity scales with sequence length (`O(T^2)` for attention, `O(T)` for feed-forward). However, this benefit is often outweighed by the increased cost in `wte` and `lm_head` for very large vocabularies.
+
+#### 3. Inference Performance
+
+- **Memory Usage**: Similar to training, a larger vocabulary increases memory requirements for storing the `wte` and `lm_head` parameters, which can be a bottleneck on resource-constrained devices.
+- **Latency**: The softmax operation in the output layer scales with vocabulary size and sequence length, potentially increasing inference latency.
+
+---
+
+## How to Find the Optimum Vocabulary Size
+
+- **Analyze Text Corpus**: Tokenize a sample of your target corpus with different vocabulary sizes and compare:
+    - Average sequence length (tokens per sentence/paragraph)
+    - Coverage of domain-specific words or rare words
+- **Balance Memory and Speed Constraints**:
+    - Ensure the embedding matrix fits comfortably in your available RAM/VRAM.
+    - Consider throughput (tokens per second) during both training and inference.
+- **Empirical Evaluation**:
+    - Test model performance (e.g., perplexity, downstream task accuracy) using several vocabulary sizes.
+    - Monitor resource utilization and latency on your hardware.
+- **Best Practice**:
+    - For English, vocabularies between 30K and 50K (based on byte-level BPE or similar) tend to provide a good balance.
+    - For languages with richer morphology or multi-lingual models, a larger vocabulary may be justified.
+- **Avoid Extremes**:
+    - Too small a vocabulary leads to long sequences and inability to represent rare words meaningfully.
+    - Too large a vocabulary inflates parameter count and slows down training/inference without major gains.
+
+---
+
+If you’d like advice on constructing a new tokenizer or analyzing token distribution for your dataset, let me know!
+
+Here is your text converted to Markdown format:
+
+---
+
+- **The softmax operation in the `lm_head` is a significant bottleneck during inference, especially for large vocabularies.** Computing probabilities over 50,257 tokens is already expensive; increasing to, say, 100,000 tokens further slows down inference, especially for autoregressive generation (where tokens are generated one by one).
+
+- **Token Efficiency:** As in training, a larger vocabulary reduces sequence length, speeding up the transformer layers’ computations. This can improve inference latency for long sequences, but the softmax cost often dominates unless sequence lengths are very large.
+
+---
+
+### 4. Summary of Trade-Offs
+
+- **Larger Vocabulary:**
+  - **Pros:** Fewer tokens per text, reducing transformer computation (especially for long sequences).
+  - **Cons:** More parameters in `wte` and `lm_head`, higher memory usage, and slower softmax computation.
+
+- **Smaller Vocabulary:**
+  - **Pros:** Fewer parameters, lower memory usage, faster softmax.
+  - **Cons:** Longer sequences, increasing transformer computation.
+
+For `distilgpt2`, the vocabulary size of 50,257 (inherited from GPT-2’s BPE tokenizer) balances these factors for general-purpose English text, but the optimal size depends on your specific use case.
+
+---
+
+### How to Find the Optimal Vocabulary Size
+
+Finding the optimal vocabulary size is a trade-off between model performance (e.g., perplexity, accuracy) and computational efficiency. There’s no one-size-fits-all answer, but here’s a systematic approach to determine the best size for your needs:
+
+---
+
+#### 1. Understand Your Data and Task
+
+- **Data Characteristics:** Analyze the text corpus you’re working with. For example:
+  - **General Text:** A vocabulary of 30,000–50,000 tokens (like `distilgpt2`) is often sufficient for English, capturing most common words and subwords.
+  - **Specialized Domains:** For domains like legal or medical text, you may need a larger vocabulary to capture domain-specific terms as single tokens, reducing sequence length.
+  - **Multilingual Settings:** Supporting multiple languages may require a larger vocabulary to cover diverse scripts and words.
+- **Task Requirements:** For tasks like text generation, a larger vocabulary might improve expressiveness (fewer fragmented tokens). For tasks like classification, vocabulary size may matter less if fine-tuning focuses on transformer layers.
+
+---
+
+#### 2. Experiment with Vocabulary Sizes
+
+- **Tokenization:** Choose a tokenizer (e.g., Byte-Pair Encoding (BPE), WordPiece) and train it on your corpus with different vocabulary sizes (e.g., 10,000, 30,000, 50,000, 100,000). Tools like Hugging Face’s `tokenizers` library or SentencePiece can help.
+- **Train Models:** Train `distilgpt2`-like models with different vocabulary sizes on a subset of your data. Measure:
+  - **Perplexity:** Lower perplexity indicates better language modeling performance.
+  - **Sequence Length:** Compute the average number of tokens per text sample. Smaller vocabularies lead to longer sequences.
+  - **Training Time:** Measure time per epoch to assess computational cost.
+  - **Inference Latency:** Test generation speed for a fixed number of tokens.
+- **Hardware Constraints:** Consider your hardware (e.g., GPU memory). Larger vocabularies may require more memory than available, forcing you to use smaller sizes.
+
+---
+
+#### 3. Evaluate Computational Metrics
+
+- **Memory Usage:** Estimate memory for the `wte` and `lm_head` layers. For vocabulary size (V) and embedding dimension (D), memory is approximately
+
+  ```
+  V × D × 4 bytes (for float32)
+  ```
+
+  For `distilgpt2`, this is
+
+  ```
+  50257 × 768 × 4 ≈ 154 MB
+  ```
+
+- **Softmax Cost:** The softmax operation scales linearly with V. Test inference times for different vocabulary sizes to quantify this.
+- **Transformer Cost:** Transformer computation scales with sequence length (T). Use a tokenizer to estimate average (T) for different vocabulary sizes on your data.
+
+---
+
+#### 4. Use Empirical Rules and Literature
+
+- **Standard Sizes:** Many successful models use vocabularies in the 30,000–50,000 range (e.g., BERT: ~30,000, GPT-2: ~50,257). These sizes work well for English and similar languages.
+- **Diminishing Returns:** Research suggests that beyond ~50,000 tokens, perplexity improvements diminish, while computational costs grow significantly. For example, a study on BPE (Sennrich et al., 2016) shows that vocabulary sizes of 32,000–64,000 often balance token efficiency and model complexity.
+- **Domain-Specific Studies:** Check papers or benchmarks for your domain. For instance, multilingual models like XLM-R use larger vocabularies (~250,000) to cover multiple languages, but this may be overkill for a single language.
+
+---
+
+#### 5. Practical Steps to Optimize
+
+- **Start with a Baseline:** Use `distilgpt2`’s vocabulary (50,257) as a baseline, as it’s well-tested for general English tasks.
+- **Grid Search:** Train models with vocabulary sizes like 10,000, 20,000, 40,000, 60,000, and 80,000. Compare perplexity, training time, and inference latency.
+- **Profile Tokenization:** Use your tokenizer to analyze tokenization efficiency (e.g., average tokens per sentence). A good vocabulary minimizes fragmentation while keeping size manageable.
+- **Prune Vocabulary:** After training a tokenizer, remove rare tokens (e.g., appearing <10 times in the corpus) to reduce vocabulary size without significant loss in coverage.
+- **Fine-Tune:** If computational resources are limited, start with a pre-trained model’s vocabulary (like `distilgpt2`) and fine-tune on your data, adjusting the vocabulary size if needed.
+
+---
+
+#### 6. Tools and Metrics
+
+- **Tokenizers:** Use Hugging Face’s `tokenizers` or SentencePiece to train BPE or WordPiece tokenizers with different sizes.
+- **Profiling:** Use PyTorch’s profiler or NVIDIA’s Nsight to measure memory and compute bottlenecks for `wte`, `lm_head`, and transformer layers.
+- **Metrics:** Track:
+  - **Perplexity:** For language modeling quality.
+  - **Training Throughput:** Samples processed per second.
+  - **Inference Latency:** Time to generate a fixed number of tokens.
+  - **Memory Usage:** Peak GPU memory during training/inference.
+
+---
+
+#### 7. Example Analysis
+
+Suppose you test vocabulary sizes of 20,000 and 80,000:
+
+- **20,000:** Fewer parameters (~15.4 million for `wte`), faster softmax, but longer sequences (e.g., 20% more tokens per text). Transformer layers take longer, but overall memory is lower.
+- **80,000:** More parameters (~61.4 million for `wte`), slower softmax, but shorter sequences (e.g., 15% fewer tokens). Transformer layers are faster, but `lm_head` dominates compute time.
+
+---
+
+**Summary:**  
+Select vocabulary size based on a balance between performance, computational resource constraints, and the specifics of your data and tasks. Use empirical experimentation and profiling metrics to guide your choice, starting with standard benchmarks and adjusting as needed for your use case.
+
+---
+
+- dominates compute time.
+
+- **Decision**: If perplexity is similar but 20,000 fits your hardware better, choose it. If 80,000 significantly improves perplexity for long texts, it might be worth the extra compute cost.
+
+---
+
+### Key Takeaways
+
+- **Vocabulary Size Trade-Off**: Larger vocabularies reduce sequence length but increase memory and softmax costs. Smaller vocabularies save memory but increase transformer computation.
+- **Training**: The `wte` layer’s parameters grow linearly with vocabulary size, impacting memory and gradient computation. Backpropagation treats `wte` like other layers.
+- **Inference**: Softmax in `lm_head` is a bottleneck for large vocabularies, affecting latency.
+- **Finding the Optimum**: Experiment with different sizes, measure perplexity and computational metrics, and consider your data and hardware constraints. A range of 30,000–50,000 is often a good starting point for English.
+
+---
+
+If you want to dive deeper (e.g., code to train a tokenizer, analyze `distilgpt2`’s vocabulary, or estimate compute costs), let me know!
+
+---
+
 > I'm studying LLMs but exploring simply models. I'm using distilgpt2 from hugging face. I'm using python. I loaded the model, exported its details and manage to understand the wte layer, now I need help to undestand the wpe layer. How can I create a code to generate and print the position embedding matrix like I did for wte?
 
 ---
