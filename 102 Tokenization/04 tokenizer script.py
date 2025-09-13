@@ -1,3 +1,4 @@
+import datetime
 from multiprocess import Process, Queue
 import os 
 
@@ -96,7 +97,7 @@ def parallel_tokenize(worker_id: int,
     if worker_tokenizer.pad_token is None:
         worker_tokenizer.pad_token = worker_tokenizer.eos_token
     
-    print(f"Worker {worker_id} started")
+    print(f"{datetime.datetime.now()}: Worker {worker_id} started")
 
     def tokenize_batch(text_batch):
         tokenized = worker_tokenizer(
@@ -119,23 +120,23 @@ def parallel_tokenize(worker_id: int,
         Path(output_path).mkdir(parents=True, exist_ok=True)
     
         # Save as .pt file
-        filename = f"tokenized_{batch_id}_of_{total_batches}.pt"
+        filename = f"tokenized_{batch_id + 1}_of_{total_batches}.pt"
         filepath = os.path.join(output_path, filename)
     
         # Convert to CPU tensors and save
         cpu_batch_encoding = {key: tensor.cpu() for key, tensor in batch_encoding.items()}
         torch.save(cpu_batch_encoding, filepath)
     
-        print(f"Saved batch {batch_id} from worker {worker_id} to {filepath}")
+        print(f"{datetime.datetime.now()}: Saved batch {batch_id} from worker {worker_id} to {filepath}")
     
     while True:
         queue_item = input_queue.get()
     
         if queue_item is None:  # Sentinel value to signal termination
-            print(f"Worker {worker_id} terminating")
+            print(f"{datetime.datetime.now()}: Worker {worker_id} terminating")
             break
         batch_id, text_batch = queue_item
-        print(f"Worker {worker_id} processing batch of size {len(text_batch)}")
+        print(f"{datetime.datetime.now()}: Worker {worker_id} processing batch of size {len(text_batch)}")
         tokenized_output = tokenize_batch(text_batch)
         save_batch(tokenized_output, 
                    output_path, 
@@ -148,7 +149,7 @@ if __name__ == "__main__":
     args = parse_arguments()
 
     input_queue = Queue()
-    print('Input queue created')
+    print(f'{datetime.datetime.now()}: Input queue created')
 
     dataLoader = import_data(dataset_name=args.dataset_name,
                              dataset_split=args.dataset_split,
@@ -159,7 +160,7 @@ if __name__ == "__main__":
     total_batches = len(dataLoader)
 
     for batch_id, batch_text in enumerate(dataLoader):
-        print(f"Enqueuing batch {batch_id} of size {len(batch_text)}")
+        print(f"{datetime.datetime.now()}: Enqueuing batch {batch_id} of size {len(batch_text)}")
         input_queue.put((batch_id, batch_text))
     
     workers = []
@@ -179,7 +180,7 @@ if __name__ == "__main__":
     # Wait for all workers to complete
     for worker in workers:
         worker.join()
-    print("All workers completed successfully!")
+    print(f"{datetime.datetime.now()}: All workers completed successfully!")
 
 # how to run the script:
 # python "04 tokenizer script.py" --dataset-name "TucanoBR/tucano-sft" 
