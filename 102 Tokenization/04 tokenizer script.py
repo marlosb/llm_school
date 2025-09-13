@@ -9,8 +9,6 @@ from transformers import PreTrainedTokenizerFast
 import torch
 from torch.utils.data import DataLoader
 
-output_path = '../data/tokenized/'
-
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Parallel tokenization script \
                                                    for datasets')
@@ -71,7 +69,7 @@ def import_data(dataset_name:str='TucanoBR/GigaVerbo',
     dataset = load_dataset(dataset_name, 
                            split=dataset_split, 
                            cache_dir=cache_dir)
-    print(f"Dataset {dataset_name} loaded with {len(dataset)} samples")
+    print(f"{datetime.datetime.now()}: Dataset {dataset_name} loaded with {len(dataset)} samples")
     
     # Create collate function
     def collate_fn(batch):
