@@ -2,62 +2,17 @@ import datetime
 from multiprocess import Process, Queue
 import os 
 
-import argparse
 from datasets import load_dataset
+import h5py
+import numpy as np
 from pathlib import Path
 from transformers import PreTrainedTokenizerFast
-import torch
 from torch.utils.data import DataLoader
 
-def parse_arguments():
-    parser = argparse.ArgumentParser(description='Parallel tokenization script \
-                                                   for datasets')
-    
-    # Dataset arguments
-    parser.add_argument('--dataset-name', 
-                        type=str, default='TucanoBR/wikipedia-PT',
-                        help='Dataset name to load (default: \
-                              TucanoBR/wikipedia-PT)')
-    
-    parser.add_argument('--dataset-split', 
-                        type=str, default='train[:10]',
-                        help='Dataset split to use (default: train[:10])')
-    
-    parser.add_argument('--text-column', type=str, default='text',
-                        help='Column name containing text data \
-                             (default: text)')
-    
-    parser.add_argument('--cache-dir', type=str, default='../data',
-                        help='Directory to cache dataset \
-                              (default: ../data)')
-    
-    # Tokenizer arguments
-    parser.add_argument('--tokenizer-path', type=str, 
-                        default='../models/30k/',
-                        help='Path to tokenizer model \
-                            (default: ../models/30k/)')
-    
-    parser.add_argument('--max-length', type=int, 
-                        default=512,
-                        help='Maximum sequence length for tokenization \
-                              (default: 512)')
-    
-    # Processing arguments
-    parser.add_argument('--batch-size', type=int, 
-                        default=100000,
-                        help='Batch size for processing (default: 100000)')
-    
-    parser.add_argument('--num-workers', type=int, 
-                        default=4,
-                        help='Number of worker processes (default: 4)')
-    
-    # Output arguments
-    parser.add_argument('--output-path', type=str, 
-                        default='../data/tokenized/',
-                        help='Output directory for tokenized data \
-                             (default: ../data/tokenized/)')
-    
-    return parser.parse_args()
+from _utils import parse_arguments
+
+def now() -> str:
+    return datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 def import_data(dataset_name:str='TucanoBR/GigaVerbo', 
                 dataset_split:str='train[:10]',
@@ -69,7 +24,7 @@ def import_data(dataset_name:str='TucanoBR/GigaVerbo',
     dataset = load_dataset(dataset_name, 
                            split=dataset_split, 
                            cache_dir=cache_dir)
-    print(f"{datetime.datetime.now()}: Dataset {dataset_name} loaded with {len(dataset)} samples")
+    print(f"{now()}: Dataset {dataset_name} loaded with {len(dataset)} samples")
     
     # Create collate function
     def collate_fn(batch):
@@ -85,58 +40,72 @@ def parallel_tokenize(worker_id: int,
                       input_queue:Queue, 
                       output_path: str,
                       total_batches: int,
-                      tokenizer_path: str = '../models/30k/', 
+                      tokenizer_path: str = '../models/30k.json', 
                       max_length: int = 512
                   ) -> None:
     
     # Each worker loads its own tokenizer to avoid sharing issues
-    worker_tokenizer = PreTrainedTokenizerFast.from_pretrained(tokenizer_path)
+    worker_tokenizer = PreTrainedTokenizerFast(tokenizer_file=tokenizer_path)
 
     if worker_tokenizer.pad_token is None:
         worker_tokenizer.pad_token = worker_tokenizer.eos_token
     
-    print(f"{datetime.datetime.now()}: Worker {worker_id} started")
+    print(f"{now()}: Worker {worker_id} started")
 
     def tokenize_batch(text_batch):
         tokenized = worker_tokenizer(
             text_batch,
-            padding='max_length',  # Always pad to max_length
+            padding=False,  # No padding - will be done later
             truncation=True,
             max_length=max_length,
-            return_tensors="pt"
+            return_attention_mask=False,  # Don't store attention masks
+            return_tensors="np"
         )
-        return tokenized
+        return tokenized['input_ids']
     
-    def save_batch(batch_encoding, 
+    def save_batch(token_sequences, 
                    output_path: str, 
                    batch_id: int, 
                    total_batches: int):
         """
-        Save BatchEncoding as PyTorch tensors - most efficient for PyTorch usage
+        Save BatchEncoding as HDF5 file - efficient for NumPy arrays
         """
         # Ensure output directory exists
         Path(output_path).mkdir(parents=True, exist_ok=True)
-    
-        # Save as .pt file
-        filename = f"tokenized_{batch_id + 1}_of_{total_batches}.pt"
+
+        # Convert to int16 to save space (30K vocab fits in 16 bits)
+        all_tokens = []
+        lengths = []
+
+        for seq in token_sequences:
+            if len(seq) > 0:
+                seq_int16 = np.clip(seq, 0, 65535).astype(np.int16)
+                all_tokens.extend(seq_int16)
+                lengths.append(len(seq_int16))
+            else:
+                lengths.append(0)
+
+        # Save as .h5 file
+        filename = f"tokenized_{batch_id + 1}_of_{total_batches}.npz"
         filepath = os.path.join(output_path, filename)
+
+        np.savez_compressed(filepath, 
+                           tokens=np.array(all_tokens, dtype=np.int16), 
+                           lengths=np.array(lengths, dtype=np.int32))
     
-        # Convert to CPU tensors and save
-        cpu_batch_encoding = {key: tensor.cpu() for key, tensor in batch_encoding.items()}
-        torch.save(cpu_batch_encoding, filepath)
-    
-        print(f"{datetime.datetime.now()}: Saved batch {batch_id} from worker {worker_id} to {filepath}")
-    
+        file_size = os.path.getsize(filepath) / (1024**3)
+        print(f"{now()}: worker {worker_id} saved batch {batch_id} to {filepath} ({file_size:.2f} GB)")
+
     while True:
         queue_item = input_queue.get()
     
         if queue_item is None:  # Sentinel value to signal termination
-            print(f"{datetime.datetime.now()}: Worker {worker_id} terminating")
+            print(f"{now()}: Worker {worker_id} terminating")
             break
         batch_id, text_batch = queue_item
-        print(f"{datetime.datetime.now()}: Worker {worker_id} processing batch of size {len(text_batch)}")
-        tokenized_output = tokenize_batch(text_batch)
-        save_batch(tokenized_output, 
+        print(f"{now()}: Worker {worker_id} processing batch id {batch_id}")
+        tokenized_sequences = tokenize_batch(text_batch)
+        save_batch(tokenized_sequences, 
                    output_path, 
                    batch_id=batch_id, 
                    total_batches=total_batches)
@@ -147,7 +116,7 @@ if __name__ == "__main__":
     args = parse_arguments()
 
     input_queue = Queue()
-    print(f'{datetime.datetime.now()}: Input queue created')
+    print(f'{now()}: Input queue created')
 
     dataLoader = import_data(dataset_name=args.dataset_name,
                              dataset_split=args.dataset_split,
@@ -158,7 +127,7 @@ if __name__ == "__main__":
     total_batches = len(dataLoader)
 
     for batch_id, batch_text in enumerate(dataLoader):
-        print(f"{datetime.datetime.now()}: Enqueuing batch {batch_id} of size {len(batch_text)}")
+        print(f"{now()}: Enqueuing batch {batch_id} of size {len(batch_text)}")
         input_queue.put((batch_id, batch_text))
     
     workers = []
@@ -178,7 +147,7 @@ if __name__ == "__main__":
     # Wait for all workers to complete
     for worker in workers:
         worker.join()
-    print(f"{datetime.datetime.now()}: All workers completed successfully!")
+    print(f"{now()}: All workers completed successfully!")
 
 # how to run the script:
 # python "04 tokenizer script.py" --dataset-name "TucanoBR/tucano-sft" 
