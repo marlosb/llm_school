@@ -8,6 +8,7 @@ import numpy as np
 from pathlib import Path
 from transformers import PreTrainedTokenizerFast
 from torch.utils.data import DataLoader
+import torch
 
 from _utils import parse_arguments
 
@@ -45,7 +46,7 @@ def parallel_tokenize(worker_id: int,
                   ) -> None:
     
     # Each worker loads its own tokenizer to avoid sharing issues
-    worker_tokenizer = PreTrainedTokenizerFast(tokenizer_file=tokenizer_path)
+    worker_tokenizer = PreTrainedTokenizerFast.from_pretrained(tokenizer_path)
 
     if worker_tokenizer.pad_token is None:
         worker_tokenizer.pad_token = worker_tokenizer.eos_token
@@ -55,46 +56,39 @@ def parallel_tokenize(worker_id: int,
     def tokenize_batch(text_batch):
         tokenized = worker_tokenizer(
             text_batch,
-            padding=False,  # No padding - will be done later
+            padding="max_length",  # Enable padding to max_length
             truncation=True,
             max_length=max_length,
-            return_attention_mask=False,  # Don't store attention masks
+            return_attention_mask=True,  # Need attention masks when padding
             return_tensors="np"
         )
-        return tokenized['input_ids']
+        return tokenized['input_ids'], tokenized['attention_mask']
     
-    def save_batch(token_sequences, 
+    def save_batch(token_sequences,
+                   attention_masks, 
                    output_path: str, 
                    batch_id: int, 
                    total_batches: int):
         """
-        Save BatchEncoding as HDF5 file - efficient for NumPy arrays
+        Save BatchEncoding as NPZ file - efficient for NumPy arrays
         """
         # Ensure output directory exists
         Path(output_path).mkdir(parents=True, exist_ok=True)
 
         # Convert to int16 to save space (30K vocab fits in 16 bits)
-        all_tokens = []
-        lengths = []
+        tokens_int16 = np.clip(token_sequences, 0, 65535).astype(np.int16)
+        attention_bool = attention_masks.astype(bool)
 
-        for seq in token_sequences:
-            if len(seq) > 0:
-                seq_int16 = np.clip(seq, 0, 65535).astype(np.int16)
-                all_tokens.extend(seq_int16)
-                lengths.append(len(seq_int16))
-            else:
-                lengths.append(0)
-
-        # Save as .h5 file
+        # Save as .npz file
         filename = f"tokenized_{batch_id + 1}_of_{total_batches}.npz"
         filepath = os.path.join(output_path, filename)
 
         np.savez_compressed(filepath, 
-                           tokens=np.array(all_tokens, dtype=np.int16), 
-                           lengths=np.array(lengths, dtype=np.int32))
+                           tokens=tokens_int16, 
+                           attention_mask=attention_bool)
     
-        file_size = os.path.getsize(filepath) / (1024**3)
-        print(f"{now()}: worker {worker_id} saved batch {batch_id} to {filepath} ({file_size:.2f} GB)")
+        file_size = os.path.getsize(filepath) / (1024**2)
+        print(f"{now()}: worker {worker_id} saved batch {batch_id} to {filepath} ({file_size:.2f} MB)")
 
     while True:
         queue_item = input_queue.get()
@@ -104,8 +98,9 @@ def parallel_tokenize(worker_id: int,
             break
         batch_id, text_batch = queue_item
         print(f"{now()}: Worker {worker_id} processing batch id {batch_id}")
-        tokenized_sequences = tokenize_batch(text_batch)
+        tokenized_sequences, attention_masks = tokenize_batch(text_batch)
         save_batch(tokenized_sequences, 
+                   attention_masks,
                    output_path, 
                    batch_id=batch_id, 
                    total_batches=total_batches)
