@@ -24,9 +24,9 @@ def parse_arguments():
     
     # Tokenizer arguments
     parser.add_argument('--tokenizer-path', type=str, 
-                        default='../models/30k.json',
+                        default='../models/30k/',
                         help='Path to tokenizer model \
-                            (default: ../models/30k.json)')
+                            (default: ../models/30k/)')
     
     parser.add_argument('--max-length', type=int, 
                         default=512,
