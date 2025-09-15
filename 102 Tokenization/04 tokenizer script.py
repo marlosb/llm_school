@@ -53,16 +53,52 @@ def parallel_tokenize(worker_id: int,
     
     print(f"{now()}: Worker {worker_id} started")
 
-    def tokenize_batch(text_batch):
-        tokenized = worker_tokenizer(
-            text_batch,
-            padding="max_length",  # Enable padding to max_length
-            truncation=True,
-            max_length=max_length,
-            return_attention_mask=True,  # Need attention masks when padding
-            return_tensors="np"
-        )
-        return tokenized['input_ids'], tokenized['attention_mask']
+    def tokenize_batch(text_batch, max_length):
+
+        all_input_ids = []
+        all_attention_masks = []
+
+         # Process each text individually - much simpler approach
+        for text in text_batch:
+            # Tokenize without return_tensors first to get Python lists
+            tokenized = worker_tokenizer(
+                text,
+                padding="max_length",
+                truncation=True,
+                max_length=max_length,
+                stride=60,
+                return_attention_mask=True,
+                return_overflowing_tokens=True,
+                return_tensors=None  # Get Python lists, not tensors
+            )
+
+            # Extract the lists - these are guaranteed to be Python lists now
+            input_ids_list = tokenized['input_ids']
+            attention_mask_list = tokenized['attention_mask']
+            
+            # Handle single vs multiple chunks - input_ids_list is either:
+            # - A single list [101, 2054, ...] for no chunking
+            # - A list of lists [[101, 2054, ...], [2003, 1996, ...]] for chunking
+            if isinstance(input_ids_list[0], int):
+                # Single chunk case - wrap in another list
+                input_ids_list = [input_ids_list]
+                attention_mask_list = [attention_mask_list]
+            
+            # Add all chunks to our collections
+            for chunk_ids, chunk_mask in zip(input_ids_list, attention_mask_list):
+                all_input_ids.append(chunk_ids)
+                all_attention_masks.append(chunk_mask)
+
+        # Convert to numpy arrays with efficient dtypes
+        all_input_ids = np.array(all_input_ids, dtype=np.uint16)
+        all_attention_masks = np.array(all_attention_masks, dtype=np.bool_)
+            
+        print_text = (f"{now()}: Worker {worker_id}: created ",
+                      f"{len(all_input_ids)} chunks from {len(text_batch)}",
+                      f" original texts")
+        print(''.join(print_text))
+
+        return all_input_ids, all_attention_masks
     
     def save_batch(token_sequences,
                    attention_masks, 
@@ -75,20 +111,18 @@ def parallel_tokenize(worker_id: int,
         # Ensure output directory exists
         Path(output_path).mkdir(parents=True, exist_ok=True)
 
-        # Convert to int16 to save space (30K vocab fits in 16 bits)
-        tokens_int16 = np.clip(token_sequences, 0, 65535).astype(np.int16)
-        attention_bool = attention_masks.astype(bool)
-
         # Save as .npz file
         filename = f"tokenized_{batch_id + 1}_of_{total_batches}.npz"
         filepath = os.path.join(output_path, filename)
 
         np.savez_compressed(filepath, 
-                           tokens=tokens_int16, 
-                           attention_mask=attention_bool)
+                           tokens=token_sequences, 
+                           attention_mask=attention_masks)
     
         file_size = os.path.getsize(filepath) / (1024**2)
-        print(f"{now()}: worker {worker_id} saved batch {batch_id} to {filepath} ({file_size:.2f} MB)")
+        print_text = (f"{now()}: Worker {worker_id}: saved batch {batch_id} ",
+                      f"to {filepath} ({file_size:.2f} MB)")
+        print(''.join(print_text))
 
     while True:
         queue_item = input_queue.get()
@@ -98,7 +132,8 @@ def parallel_tokenize(worker_id: int,
             break
         batch_id, text_batch = queue_item
         print(f"{now()}: Worker {worker_id} processing batch id {batch_id}")
-        tokenized_sequences, attention_masks = tokenize_batch(text_batch)
+        tokenized_sequences, attention_masks = tokenize_batch(text_batch, 
+                                                              max_length)
         save_batch(tokenized_sequences, 
                    attention_masks,
                    output_path, 
