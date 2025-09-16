@@ -1,0 +1,4 @@
+Para futuras versões:
+ - Immplementar Gradient Checkpointing (aumentar max tokens/batches)
+ - Implementas flash attention no modelo (aumentar max tokens)
+ - Avaliar implementar KV caching
