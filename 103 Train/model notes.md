@@ -286,19 +286,6 @@ def train_model(model, train_dataset, val_dataset=None, batch_size=16, num_epoch
                     val_loss += loss.item()
             avg_val_loss = val_loss / len(val_loader)
             print(f"Epoch {epoch+1}, Val Loss: {avg_val_loss:.4f}")
-```
-
-Fill in your own tokenized dataset and model construction as appropriate.
-
-Here is the provided HTML content converted into a markdown conversation. The code snippets, notes, key points, and questions are all preserved in clear markdown formatting.
-
----
-
-```python
-1: ].contiguous()
-                    loss = criterion(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
-                    val_loss += loss.item()
-            print(f"Epoch {epoch+1}, Val Loss: {val_loss / len(val_loader):.4f}")
         
         # Save checkpoint
         torch.save(model.state_dict(), f"distilgpt2_epoch_{epoch+1}.pt")
@@ -501,14 +488,6 @@ class GPT2Block(nn.Module):
     pass
 ```
 
----
-
-Let me know if you want a full model class, more code, or an explanation of any part!
-
-Here is the same conversation converted to Markdown:
-
----
-
 ## Key Features for Configurability
 
 1. **Adjustable Parameters**:
@@ -615,15 +594,6 @@ class DistilGPT2(nn.Module):
         logits = self.lm_head(x)
         return logits
 ```
-
----
-
-Let me know if you want the full code or further clarification!
-
-Here is the entire conversation and explanation in Markdown format:
-
----
-
 To scale the model up or down, you can adjust `embed_dim`, `num_layers`, or `num_heads` in the constructor. For example:
 
 ```python
@@ -753,14 +723,6 @@ Here’s how you can verify your data programmatically and visually:
 
 Feel free to adapt these checks to your data pipeline and let me know if you encounter any unexpected outputs or errors. If you specify your pad token ID or describe your dataset structure, I can provide more customized code or validation logic!
 
----
-
-Ready for the training loop or anything else? Just let me know!
-
-Here's the markdown version of your HTML conversation:
-
----
-
 ## 1. Tokenized Dataset Example
 
 ```python
@@ -887,10 +849,6 @@ for batch in loader:
         print(decoded)
     break
 ```
-
----
-
-Let me know if you need any formatting tweaks or more examples!
 
 **Self-attention vs. Cross-attention in LLMs**
 
