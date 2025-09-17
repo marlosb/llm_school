@@ -118,6 +118,13 @@ def parse_training_args():
         default=10000,
         help='Save checkpoint every N steps'
     )
+
+    parser.add_argument(
+        '--progress-freq',
+        type=int,
+        default=400,
+        help='Log training progress every N steps'
+    )
     
     # Resume training arguments
     parser.add_argument(
@@ -177,6 +184,7 @@ def print_args(args):
     print(f"  Checkpoint directory: {args.checkpoint_dir}")
     print(f"  Log file: {args.log_file}")
     print(f"  Checkpoint frequency: {args.checkpoint_freq} steps")
+    print(f"  Progress frequency: {args.progress_freq} steps")
     
     if args.resume_from_checkpoint:
         print(f"\n🔄 Resume Configuration:")

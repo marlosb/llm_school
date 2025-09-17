@@ -131,7 +131,7 @@ def train_model(model, args):
                 avg_loss = total_loss / global_step
 
                 # Log progress
-                if global_step % 400 == 0:
+                if global_step % args.progress_freq == 0:
                     progress = dataset.get_overall_progress()
                     duration = time.time() - epoch_start_time
                     # Format time nicely with timedelta
