@@ -83,12 +83,6 @@ def train_model(model, args):
     
     # Process all batches
     while True:
-        if len(dataset) == 0:
-            # Try to load next batch
-            if not dataset.load_next_batch():
-                print("All batches processed!")
-                break
-            
         # Show current batch info
         batch_info = dataset.get_batch_info()
         print(f"\n🔄 Processing batch {batch_info['current_batch']}/"
@@ -174,11 +168,7 @@ def train_model(model, args):
                 f"{progress['overall_progress_percent']:.1f}%"
             )
         
-        # Check if we need to load next batch
-        if not dataset.has_next_batch():
-            break
-
-        # Save checkpoint after completing current batch, before loading next
+        # Save checkpoint after completing current batch
         save_checkpoint(
             model, optimizer, args.num_epochs, global_step, avg_loss, 
             args.checkpoint_dir, 'distilgpt2_batch_complete'
@@ -189,6 +179,24 @@ def train_model(model, args):
         # Mark current batch as processed after saving checkpoint
         dataset._mark_current_batch_as_processed()
         print(f"✅ Marked batch {batch_info['current_batch']} files as processed")
+
+        # Check if we need to load next batch
+        if not dataset.has_next_batch():
+            print("✅ All batches processed!")
+            break
+
+        # Load next batch
+        print(f"🔄 Loading next batch...")
+        if not dataset.load_next_batch():
+            print("❌ Failed to load next batch!")
+            break
+        
+        # Show info about newly loaded batch
+        new_batch_info = dataset.get_batch_info()
+        print(f"✅ Successfully loaded batch {new_batch_info['current_batch']}/"
+              f"{new_batch_info['total_batches']}")
+        print(f"   Files in new batch: {new_batch_info['files_in_current_batch']}")
+        print(f"   Sequences in new batch: {new_batch_info['sequences_in_current_batch']}")
 
     # Final summary
     final_progress = dataset.get_overall_progress()
@@ -209,7 +217,7 @@ def train_model(model, args):
 
     # Mark the last batch as processed when training completes
     dataset.finalize_training()
-
+    
 # Resume training function
 def resume_training(model, args):
     """Resume training from a checkpoint."""
