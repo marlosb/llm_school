@@ -141,7 +141,7 @@ def train_model(model, args):
                         f"Loss: {loss_val.item():.4f}, "
                         f"Avg Loss: {avg_loss:.4f}, "
                         f"Progress: "
-                        f"{progress['overall_progress_percent']:.1f}% "
+                        f"{progress['overall_progress_percent']:.1f}%, "
                         f"Time: {time_str}"
                     )
                     print(
@@ -149,7 +149,7 @@ def train_model(model, args):
                         f"Loss: {loss_val.item():.4f}, "
                         f"Avg Loss: {avg_loss:.4f}, "
                         f"Progress: "
-                        f"{progress['overall_progress_percent']:.1f}% "
+                        f"{progress['overall_progress_percent']:.1f}%, "
                         f"Time: {time_str}"
                     )
 
