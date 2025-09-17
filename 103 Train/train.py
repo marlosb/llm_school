@@ -66,7 +66,6 @@ def train_model(model, args):
     print(f"  Total files: {progress['total_files']}")
     print(f"  Already processed: {progress['processed_files']}")
     print(f"  Remaining files: {progress['remaining_files']}")
-    print(f"  Progress: {progress['overall_progress_percent']:.1f}%")
     print(f"  Current batch: {batch_info['current_batch']}/"
           f"{batch_info['total_batches']}")
 
@@ -134,16 +133,12 @@ def train_model(model, args):
                         f"Epoch {epoch+1}, Step {global_step}, "
                         f"Loss: {loss_val.item():.4f}, "
                         f"Avg Loss: {avg_loss:.4f}, "
-                        f"Progress: "
-                        f"{progress['overall_progress_percent']:.1f}%, "
                         f"Time: {time_str}"
                     )
                     print(
                         f"Epoch {epoch+1}, Step {global_step}, "
                         f"Loss: {loss_val.item():.4f}, "
                         f"Avg Loss: {avg_loss:.4f}, "
-                        f"Progress: "
-                        f"{progress['overall_progress_percent']:.1f}%, "
                         f"Time: {time_str}"
                     )
 
