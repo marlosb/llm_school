@@ -1,62 +1,14 @@
 import os
+
+import argparse
 import numpy as np
 import torch
-from pathlib import Path
+from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizerFast
-from torch.utils.data import Dataset, DataLoader
 from typing import List, Tuple, Dict, Any
 
-class TokenizedDataset(Dataset):
-    """PyTorch Dataset for loading tokenized NPZ files."""
-    
-    def __init__(self, data_dir: str, file_pattern: str = "tokenized_*.npz"):
-        self.data_dir = Path(data_dir)
-        self.files = sorted(list(self.data_dir.glob(file_pattern)))
-        
-        if not self.files:
-            raise ValueError(f"No files found matching pattern '{file_pattern}' in {data_dir}")
-        
-        print(f"Found {len(self.files)} tokenized files:")
-        for f in self.files:
-            print(f"  - {f.name}")
-        
-        # Load all data into memory with optimized data types
-        self.input_ids = []
-        self.attention_masks = []
-        
-        for file_path in self.files:
-            data = np.load(file_path)
-            tokens = data['tokens']
-            masks = data['attention_mask']
-            
-            print(f"Loading {file_path.name}: {tokens.shape[0]} sequences")
-            
-            # Convert to more memory-efficient data types
-            # int16 for tokens (range: -32,768 to 32,767, we need 0-29,999)
-            tokens_int16 = tokens.astype(np.int16)
-            
-            # int8 for attention masks (range: -128 to 127, we need 0-1) 
-            # Actually, bool is even more efficient for binary data
-            masks_bool = masks.astype(np.bool_)
-            
-            self.input_ids.extend(tokens_int16)
-            self.attention_masks.extend(masks_bool)
-        
-        self.input_ids = np.array(self.input_ids, dtype=np.int16)
-        self.attention_masks = np.array(self.attention_masks, dtype=np.bool_)
-        
-        print(f"Total loaded sequences: {len(self.input_ids)}")
-        print(f"Final dtypes: input_ids={self.input_ids.dtype}, attention_masks={self.attention_masks.dtype}")
-        print(f"Final memory usage: {(self.input_ids.nbytes + self.attention_masks.nbytes) / (1024**2):.2f} MB")
-    
-    def __len__(self):
-        return len(self.input_ids)
-    
-    def __getitem__(self, idx):
-        return {
-            'input_ids': torch.tensor(self.input_ids[idx], dtype=torch.long),
-            'attention_mask': torch.tensor(self.attention_masks[idx], dtype=torch.long)
-        }
+from data_utils import TokenizedDataset
+
 
 def get_padding_token_id(tokenizer: PreTrainedTokenizerFast) -> int:
     """Get the actual padding token ID from the tokenizer."""
@@ -470,14 +422,42 @@ def print_data_statistics(input_ids: np.ndarray, attention_masks: np.ndarray):
 def main():
     """Main validation function."""
     
+    # Add argument parsing
+    parser = argparse.ArgumentParser(
+        description='Validate DistilGPT2 tokenized data'
+    )
+    parser.add_argument(
+        '--batch-size', 
+        type=int, 
+        default=1,
+        help='Number of files to load in memory at once (default: 1)'
+    )
+    parser.add_argument(
+        '--data-dir',
+        type=str,
+        default="../data/tokenized/",
+        help='Directory containing tokenized files (default: ../data/tokenized/)'
+    )
+    parser.add_argument(
+        '--tokenizer-path',
+        type=str,
+        default="../models/30k/",
+        help='Path to tokenizer (default: ../models/30k/)'
+    )
+    
+    args = parser.parse_args()
+    
     print("🚀 DistilGPT2 Data Validation (with Memory Optimization)")
     print("=" * 60)
     
-    # Configuration
-    data_dir = "../data/tokenized/"
-    tokenizer_path = "../models/30k/"
+    # Configuration from arguments
+    data_dir = args.data_dir
+    tokenizer_path = args.tokenizer_path
+    batch_size = args.batch_size
     vocab_size = 30000
     max_length = 512
+    
+    print(f"Using batch size: {batch_size} files")
     
     try:
         # Load tokenizer
@@ -493,9 +473,12 @@ def main():
         print(f"  EOS token ID: {tokenizer.eos_token_id}")
         print(f"  Note: Tokenizer script sets pad_token = eos_token")
         
-        # Load dataset
+        # Load dataset with batch size
         print(f"\nLoading dataset from: {data_dir}")
-        dataset = TokenizedDataset(data_dir)
+        dataset = TokenizedDataset(
+            data_dir, 
+            max_files_in_memory=batch_size
+        )
         print("✅ Dataset loaded successfully")
         
         # Get data arrays for validation
@@ -505,16 +488,27 @@ def main():
         print(f"\nDataset Summary:")
         print(f"  Total sequences: {len(dataset)}")
         print(f"  Input IDs shape: {input_ids.shape} (dtype: {input_ids.dtype})")
-        print(f"  Attention masks shape: {attention_masks.shape} (dtype: {attention_masks.dtype})")
+        print(f"  Attention masks shape: {attention_masks.shape} "
+              f"(dtype: {attention_masks.dtype})")
+        
+        # Show batch info
+        batch_info = dataset.get_batch_info()
+        print(f"  Batch info: {batch_info['current_batch']}/"
+              f"{batch_info['total_batches']} "
+              f"({batch_info['files_in_current_batch']} files)")
         
         # Validation steps
         validation_results = {}
         
         # 1. Validate input IDs
-        validation_results['input_ids'] = validate_input_ids(input_ids, vocab_size, max_length)
+        validation_results['input_ids'] = validate_input_ids(
+            input_ids, vocab_size, max_length
+        )
         
         # 2. Validate attention masks
-        validation_results['attention_masks'] = validate_attention_masks(attention_masks, input_ids, tokenizer)
+        validation_results['attention_masks'] = validate_attention_masks(
+            attention_masks, input_ids, tokenizer
+        )
         
         # 3. Print data statistics
         print_data_statistics(input_ids, attention_masks)
@@ -544,21 +538,33 @@ def main():
         if all_valid:
             print("🎉 ALL VALIDATIONS PASSED!")
             print("Your data is ready for training with DistilGPT2!")
-            print("💾 Memory optimization: Using int16 for tokens and bool for attention masks")
-            print("🔧 Model updated: Now properly handles padding masks combined with causal masks")
+            print("💾 Memory optimization: Using int16 for tokens and "
+                  "bool for attention masks")
+            print("🔧 Model updated: Now properly handles padding masks "
+                  "combined with causal masks")
         else:
             print("⚠️  SOME VALIDATIONS FAILED!")
             print("Please address the issues above before training.")
             
             # Provide specific guidance for common issues
-            if any('misaligned padding' in issue for results in validation_results.values() for issue in results.get('issues', [])):
+            has_padding_issues = any(
+                'misaligned padding' in issue 
+                for results in validation_results.values() 
+                for issue in results.get('issues', [])
+            )
+            if has_padding_issues:
                 print("\n💡 Padding Alignment Fix:")
-                print("   The attention masks don't align with the expected padding token.")
+                print("   The attention masks don't align with the "
+                      "expected padding token.")
                 print("   This might be because:")
-                print("   1. The tokenizer's pad_token_id is different from what's expected")
-                print("   2. The tokenization process used a different padding token") 
-                print("   3. The data was preprocessed with different settings")
-                print("   4. Check if the tokenizer script used the same tokenizer as validation")
+                print("   1. The tokenizer's pad_token_id is different "
+                      "from what's expected")
+                print("   2. The tokenization process used a different "
+                      "padding token") 
+                print("   3. The data was preprocessed with different "
+                      "settings")
+                print("   4. Check if the tokenizer script used the same "
+                      "tokenizer as validation")
                 
         print("=" * 60)
         
