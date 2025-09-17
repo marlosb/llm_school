@@ -186,6 +186,10 @@ def train_model(model, args):
         print(f"💾 Checkpoint saved after completing batch "
               f"{batch_info['current_batch']}")
 
+        # Mark current batch as processed after saving checkpoint
+        dataset._mark_current_batch_as_processed()
+        print(f"✅ Marked batch {batch_info['current_batch']} files as processed")
+
     # Final summary
     final_progress = dataset.get_overall_progress()
     logging.info(
