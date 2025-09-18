@@ -72,7 +72,16 @@ def train_model(model, args):
     # Initialize model, optimizer, and loss function
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"\tUsing device: {device}")
+
     model = model.to(device)
+
+    # Then wrap with DataParallel if multiple GPUs are available
+    if torch.cuda.is_available() and torch.cuda.device_count() > 1:
+        print(f"\tUsing {torch.cuda.device_count()} GPUs with DataParallel")
+        model = nn.DataParallel(model)  # Wrap model for multi-GPU
+    else:
+        print(f"\tUsing single {device}")
+
     optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate)
     criterion = nn.CrossEntropyLoss(ignore_index=-100)
 
@@ -164,8 +173,12 @@ def train_model(model, args):
             )
         
         # Save checkpoint after completing current batch
+        if isinstance(model, nn.DataParallel):
+            model_to_save = model.module
+        else :
+            model_to_save = model
         save_checkpoint(
-            model, optimizer, args.num_epochs, global_step, avg_loss, 
+            model_to_save, optimizer, args.num_epochs, global_step, avg_loss, 
             args.checkpoint_dir, 'distilgpt2_batch_complete'
         )
         print(f"💾 Checkpoint saved after completing batch "
@@ -221,8 +234,25 @@ def resume_training(model, args):
           f"{args.resume_from_checkpoint}")
     
     # Load checkpoint
-    checkpoint = torch.load(args.resume_from_checkpoint, map_location='cpu')
-    model.load_state_dict(checkpoint['model_state_dict'])
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    checkpoint = torch.load(args.resume_from_checkpoint, map_location=device)
+
+    model = model.to(device)
+
+    # Handle DataParallel wrapping
+    if torch.cuda.is_available() and torch.cuda.device_count() > 1:
+        print(f"\tUsing {torch.cuda.device_count()} GPUs with DataParallel")
+        model = nn.DataParallel(model)
+
+    # Load state dict (handle both wrapped and unwrapped models)
+    try:
+        model.load_state_dict(checkpoint['model_state_dict'])
+    except RuntimeError:
+        # If loading fails, try loading into the module (unwrapped version)
+        if isinstance(model, nn.DataParallel):
+            model.module.load_state_dict(checkpoint['model_state_dict'])
+        else:
+            raise
     
     print(f"Resumed from epoch {checkpoint['epoch']}, "
           f"step {checkpoint['step']}")
