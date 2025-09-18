@@ -35,15 +35,18 @@ def save_checkpoint(model,
     logging.info(f"Checkpoint saved: {checkpoint_path}")
 
 # Training function with file tracking
-def train_model(model, args):
-    """Train model using parsed arguments."""
+def train_model(model, args, checkpoint=None):
+    """Train model using parsed arguments. Can resume from checkpoint if provided."""
+    
+    # Determine if we're resuming
+    is_resuming = checkpoint is not None
     
     # Setup logging
     logging.basicConfig(
         filename=args.log_file,
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
-        filemode='w'  # overwrite/clear the file
+        filemode='a' if is_resuming else 'w'  # append if resuming, overwrite if fresh
     )
     
     # Create dataset with file tracking and batch loading
@@ -71,23 +74,38 @@ def train_model(model, args):
 
     # Initialize model, optimizer, and loss function
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"\tUsing device: {device}")
+    
+    # Only set up model if not resuming (model is already set up in resume_training)
+    if not is_resuming:
+        print(f"\tUsing device: {device}")
+        model = model.to(device)
 
-    model = model.to(device)
-
-    # Then wrap with DataParallel if multiple GPUs are available
-    if torch.cuda.is_available() and torch.cuda.device_count() > 1:
-        print(f"\tUsing {torch.cuda.device_count()} GPUs with DataParallel")
-        model = nn.DataParallel(model)  # Wrap model for multi-GPU
+        # Then wrap with DataParallel if multiple GPUs are available
+        if torch.cuda.is_available() and torch.cuda.device_count() > 1:
+            print(f"\t🚀 Using {torch.cuda.device_count()} GPUs with DataParallel")
+            model = nn.DataParallel(model)
+        else:
+            print(f"\t💻 Using single {'GPU' if torch.cuda.is_available() else 'CPU'}")
     else:
-        print(f"\tUsing single {device}")
+        # For resumed training, model is already set up
+        device = next(model.parameters()).device
+        print(f"\t🔄 Resuming with model already configured")
 
     optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate)
+    
+    # Restore optimizer state if resuming
+    if is_resuming and 'optimizer_state_dict' in checkpoint:
+        try:
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            print("✅ Optimizer state restored")
+        except Exception as e:
+            print(f"⚠️ Could not restore optimizer state: {e}")
+    
     criterion = nn.CrossEntropyLoss(ignore_index=-100)
 
     # Training loop with batch loading support
     model.train()
-    global_step = 0
+    global_step = checkpoint.get('step', 0) if is_resuming else 0  # Resume from saved step or start from 0
     
     # Process all batches
     while True:
@@ -130,7 +148,9 @@ def train_model(model, args):
                 optimizer.step()
 
                 total_loss += loss_val.item()
-                avg_loss = total_loss / global_step
+                # Calculate average loss properly for both fresh and resumed training
+                steps_in_current_session = global_step - (checkpoint.get('step', 0) if is_resuming else 0)
+                avg_loss = total_loss / steps_in_current_session if steps_in_current_session > 0 else loss_val.item()
 
                 # Log progress
                 if global_step % args.progress_freq == 0:
@@ -175,7 +195,7 @@ def train_model(model, args):
         # Save checkpoint after completing current batch
         if isinstance(model, nn.DataParallel):
             model_to_save = model.module
-        else :
+        else:
             model_to_save = model
         save_checkpoint(
             model_to_save, optimizer, args.num_epochs, global_step, avg_loss, 
@@ -226,7 +246,10 @@ def train_model(model, args):
     # Mark the last batch as processed when training completes
     dataset.finalize_training()
     
-# Resume training function
+    # Return the model for further use if needed
+    return model
+    
+# Resume training function - now much simpler
 def resume_training(model, args):
     """Resume training from a checkpoint."""
     
@@ -237,29 +260,25 @@ def resume_training(model, args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     checkpoint = torch.load(args.resume_from_checkpoint, map_location=device)
 
+    # Move model to device first
     model = model.to(device)
 
-    # Handle DataParallel wrapping
-    if torch.cuda.is_available() and torch.cuda.device_count() > 1:
-        print(f"\tUsing {torch.cuda.device_count()} GPUs with DataParallel")
-        model = nn.DataParallel(model)
+    # Load state dict first (before wrapping with DataParallel)
+    model.load_state_dict(checkpoint['model_state_dict'])
 
-    # Load state dict (handle both wrapped and unwrapped models)
-    try:
-        model.load_state_dict(checkpoint['model_state_dict'])
-    except RuntimeError:
-        # If loading fails, try loading into the module (unwrapped version)
-        if isinstance(model, nn.DataParallel):
-            model.module.load_state_dict(checkpoint['model_state_dict'])
-        else:
-            raise
+    # Handle DataParallel wrapping AFTER loading state dict
+    if torch.cuda.is_available() and torch.cuda.device_count() > 1:
+        print(f"\t🚀 Using {torch.cuda.device_count()} GPUs with DataParallel")
+        model = nn.DataParallel(model)
+    else:
+        print(f"\t💻 Using single {'GPU' if torch.cuda.is_available() else 'CPU'}")
     
-    print(f"Resumed from epoch {checkpoint['epoch']}, "
+    print(f"✅ Resumed from epoch {checkpoint['epoch']}, "
           f"step {checkpoint['step']}")
     print(f"Last recorded loss: {checkpoint['loss']:.4f}")
     
-    # Continue training
-    train_model(model, args)
+    # Continue training by passing the checkpoint to train_model
+    return train_model(model, args, checkpoint=checkpoint)
 
 # Main function
 def main():
