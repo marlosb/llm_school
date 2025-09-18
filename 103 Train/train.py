@@ -84,7 +84,13 @@ def train_model(model, args, checkpoint=None):
         device_count = torch.cuda.device_count()
         if torch.cuda.is_available() and device_count > 1:
             print(f"\t🚀 Using {device_count} GPUs with DataParallel")
-            model = nn.DataParallel(model)
+            model = nn.DataParallel(model, device_ids=list(range(device_count)))
+
+            # Print memory usage for each GPU
+            for i in range(device_count):
+                allocated = torch.cuda.memory_allocated(i) / 1e9
+                total = torch.cuda.get_device_properties(i).total_memory / 1e9
+                print(f"\t  GPU {i}: {allocated:.1f}GB / {total:.1f}GB allocated")
         else:
             print(f"\t💻 Using single "
                   f"{'GPU' if torch.cuda.is_available() else 'CPU'}")
