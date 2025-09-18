@@ -173,8 +173,8 @@ def train_model(model, args, checkpoint=None):
                     time_str = str(timedelta(seconds=int(duration))) 
                     log_and_print(
                         f"Epoch {epoch+1}, Step {global_step}, "
-                        f"Loss: {loss_val.item():.4f}, "
-                        f"Avg Loss: {avg_loss:.4f}, "
+                        f"Loss: {loss_val.item():.3f}, "
+                        f"Avg Loss: {avg_loss:.3f}, "
                         f"Time: {time_str}"
                     )
 
