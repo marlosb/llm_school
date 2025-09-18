@@ -291,8 +291,12 @@ def save_final_model(model, args):
         model_to_save = model.module
     else:
         model_to_save = model
+
+    # File 1: Save complete model (easier to load)
+    complete_model_path = os.path.join(final_model_dir, "complete_model.pt")
+    torch.save(model_to_save, complete_model_path)
     
-    # Save the full model
+    # File 2: Also keep the state_dict version for flexibility
     final_model_path = os.path.join(final_model_dir, "final.pt")
     torch.save({
         'model_state_dict': model_to_save.state_dict(),
@@ -307,7 +311,8 @@ def save_final_model(model, args):
         'training_args': vars(args)  # Save training arguments for reference
     }, final_model_path)
     
-    log_and_print(f"🎯 Final model saved to: {final_model_path}")
+    log_and_print(f"🎯 Complete model saved to: {complete_model_path}")
+    log_and_print(f"🎯 State dict saved to: {final_model_path}")
     
     # Save model in a format that can be easily loaded
     model_info_path = os.path.join(final_model_dir, "model_info.txt")
