@@ -3,6 +3,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import Dataset
 import os
+from arg_utils import log_and_print
 
 class TokenizedDataset(Dataset):
     """PyTorch Dataset for loading tokenized NPZ files with resume capability.
@@ -36,7 +37,7 @@ class TokenizedDataset(Dataset):
                 f"in {data_dir}"
             )
         
-        print(f"Found {len(all_files)} total tokenized files")
+        log_and_print(f"Found {len(all_files)} total tokenized files")
         
         # Load processed files list if log file exists
         processed_files = set()
@@ -46,7 +47,7 @@ class TokenizedDataset(Dataset):
                     line.strip() for line in f.readlines() 
                     if line.strip()
                 )
-            print(f"Found {len(processed_files)} already processed files")
+            log_and_print(f"Found {len(processed_files)} already processed files")
             
             # Filter out processed files
             self.files = [
@@ -54,7 +55,7 @@ class TokenizedDataset(Dataset):
                 if str(f) not in processed_files
             ]
             skipped = len(all_files) - len(self.files)
-            print(f"Skipping {skipped} processed files")
+            log_and_print(f"Skipping {skipped} processed files")
         else:
             # No log file exists or not provided - process all files
             self.files = all_files
@@ -65,11 +66,11 @@ class TokenizedDataset(Dataset):
                 print("No log file specified - processing all files")
         
         if not self.files:
-            print("All files have been processed! No new data to load.")
+            log_and_print("All files have been processed! No new data to load.")
             self._initialize_empty_dataset()
             return
         
-        print(f"Will process {len(self.files)} files in batches of "
+        log_and_print(f"Will process {len(self.files)} files in batches of "
               f"{max_files_in_memory}")
         
         # Initialize batch loading
@@ -81,10 +82,10 @@ class TokenizedDataset(Dataset):
         # Load first batch
         self._load_current_batch()
         
-        print(f"Loaded batch 1/{self.total_batches}")
-        print(f"Total sequences in current batch: {len(self.input_ids)}")
+        log_and_print(f"Loaded batch 1/{self.total_batches}")
+        log_and_print(f"Total sequences in current batch: {len(self.input_ids)}")
         memory_mb = (self.input_ids.nbytes + self.attention_masks.nbytes) / (1024**2)
-        print(f"Memory usage: {memory_mb:.2f} MB")
+        log_and_print(f"Memory usage: {memory_mb:.2f} MB")
 
     def _initialize_empty_dataset(self):
         """Initialize empty dataset when no files to process."""
@@ -105,7 +106,7 @@ class TokenizedDataset(Dataset):
         
         self.current_batch_files = self.files[start_idx:end_idx]
         
-        print(f"Loading batch {self.current_batch_idx + 1}/"
+        log_and_print(f"Loading batch {self.current_batch_idx + 1}/"
             f"{self.total_batches}:")
         for f in self.current_batch_files:
             print(f"  - {f.name}")
@@ -158,9 +159,9 @@ class TokenizedDataset(Dataset):
         self.current_batch_idx += 1
         self._load_current_batch()
         
-        print(f"Loaded batch {self.current_batch_idx + 1}/"
+        log_and_print(f"Loaded batch {self.current_batch_idx + 1}/"
             f"{self.total_batches}")
-        print(f"Total sequences in current batch: {len(self.input_ids)}")
+        log_and_print(f"Total sequences in current batch: {len(self.input_ids)}")
         
         return True
     
@@ -176,7 +177,7 @@ class TokenizedDataset(Dataset):
                     boundary['processed'] = True
                     f.write(f"{boundary['file_path']}\n")
                     file_name = Path(boundary['file_path']).name
-                    print(f"Marked file as processed: {file_name}")
+                    log_and_print(f"Marked file as processed: {file_name}")
 
     def finalize_training(self):
         """Call this at the end of training to mark the last batch as processed."""

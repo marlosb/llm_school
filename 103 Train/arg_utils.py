@@ -1,5 +1,27 @@
 import argparse
+import logging
 import os
+
+# Utility function for logging and printing
+def log_and_print(message, level='info'):
+    """Print message to console and log it to file.
+    
+    Args:
+        message (str): The message to print and log
+        level (str): Logging level ('info', 'warning', 'error', 'debug')
+    """
+    print(message)
+    
+    # Map level string to logging function
+    level_map = {
+        'info': logging.info,
+        'warning': logging.warning,
+        'error': logging.error,
+        'debug': logging.debug
+    }
+    
+    log_func = level_map.get(level.lower(), logging.info)
+    log_func(message)
 
 def parse_training_args():
     """Parse command line arguments for training script."""

@@ -9,7 +9,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 
 from data_utils import TokenizedDataset
-from arg_utils import parse_training_args, print_args
+from arg_utils import parse_training_args, print_args, log_and_print
 
 # Function to save checkpoint
 def save_checkpoint(model, 
@@ -35,7 +35,7 @@ def save_checkpoint(model,
         'optimizer_state_dict': optimizer.state_dict(),
         'loss': loss
     }, checkpoint_path)
-    logging.info(f"Checkpoint saved: {checkpoint_path}")
+    log_and_print(f"Checkpoint saved: {checkpoint_path}")
 
 # Training function with file tracking
 def train_model(model, args, checkpoint=None):
@@ -61,8 +61,7 @@ def train_model(model, args, checkpoint=None):
     
     # Check if there's data to process
     if len(dataset) == 0:
-        print("✅ All files have been processed! Training complete.")
-        logging.info("All files have been processed! Training complete.")
+        log_and_print("✅ All files have been processed! Training complete.")
         return
     
     # Show batch and overall progress info
@@ -108,9 +107,9 @@ def train_model(model, args, checkpoint=None):
     if is_resuming and 'optimizer_state_dict' in checkpoint:
         try:
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            print("✅ Optimizer state restored")
+            log_and_print("✅ Optimizer state restored")
         except Exception as e:
-            print(f"⚠️ Could not restore optimizer state: {e}")
+            log_and_print(f"⚠️ Could not restore optimizer state: {e}", 'warning')
     
     criterion = nn.CrossEntropyLoss(ignore_index=-100)
 
@@ -172,13 +171,7 @@ def train_model(model, args, checkpoint=None):
                     duration = time.time() - epoch_start_time
                     # Format time nicely with timedelta
                     time_str = str(timedelta(seconds=int(duration))) 
-                    logging.info(
-                        f"Epoch {epoch+1}, Step {global_step}, "
-                        f"Loss: {loss_val.item():.4f}, "
-                        f"Avg Loss: {avg_loss:.4f}, "
-                        f"Time: {time_str}"
-                    )
-                    print(
+                    log_and_print(
                         f"Epoch {epoch+1}, Step {global_step}, "
                         f"Loss: {loss_val.item():.4f}, "
                         f"Avg Loss: {avg_loss:.4f}, "
@@ -193,13 +186,7 @@ def train_model(model, args, checkpoint=None):
 
             # Epoch summary
             progress = dataset.get_overall_progress()
-            logging.info(
-                f"Epoch {epoch+1} completed. Average Loss: {avg_loss:.4f}, "
-                f"Time: {time_str}, "
-                f"Overall progress: "
-                f"{progress['overall_progress_percent']:.1f}%"
-            )
-            print(
+            log_and_print(
                 f"Epoch {epoch+1} completed. Average Loss: {avg_loss:.4f}, "
                 f"Time: {time_str}, "
                 f"Overall progress: "
@@ -215,16 +202,16 @@ def train_model(model, args, checkpoint=None):
             model_to_save, optimizer, args.num_epochs, global_step, avg_loss, 
             args.checkpoint_dir, 'distilgpt2_batch_complete'
         )
-        print(f"💾 Checkpoint saved after completing batch "
+        log_and_print(f"💾 Checkpoint saved after completing batch "
               f"{batch_info['current_batch']}")
 
         # Mark current batch as processed after saving checkpoint
         dataset._mark_current_batch_as_processed()
-        print(f"✅ Marked batch {batch_info['current_batch']} as processed")
+        log_and_print(f"✅ Marked batch {batch_info['current_batch']} as processed")
 
         # Check if we need to load next batch
         if not dataset.has_next_batch():
-            print("✅ All batches processed!")
+            log_and_print("✅ All batches processed!")
             break
 
         # Load next batch
@@ -244,11 +231,7 @@ def train_model(model, args, checkpoint=None):
 
     # Final summary
     final_progress = dataset.get_overall_progress()
-    logging.info(
-        f"Training completed. "
-        f"Final progress: {final_progress['overall_progress_percent']:.1f}%"
-    )
-    print(
+    log_and_print(
         f"Training completed. "
         f"Final progress: {final_progress['overall_progress_percent']:.1f}%"
     )
@@ -269,7 +252,7 @@ def train_model(model, args, checkpoint=None):
 def resume_training(model, args):
     """Resume training from a checkpoint."""
     
-    print(f"🔄 Resuming training from checkpoint: "
+    log_and_print(f"🔄 Resuming training from checkpoint: "
           f"{args.resume_from_checkpoint}")
     
     # Load checkpoint
@@ -284,14 +267,14 @@ def resume_training(model, args):
 
     # Handle DataParallel wrapping AFTER loading state dict
     if torch.cuda.is_available() and torch.cuda.device_count() > 1:
-        print(f"\t🚀 Using {torch.cuda.device_count()} GPUs with DataParallel")
+        log_and_print(f"\t🚀 Using {torch.cuda.device_count()} GPUs with DataParallel")
         model = nn.DataParallel(model)
     else:
-        print(f"\t💻 Using 1 {'GPU' if torch.cuda.is_available() else 'CPU'}")
+        log_and_print(f"\t💻 Using 1 {'GPU' if torch.cuda.is_available() else 'CPU'}")
     
-    print(f"✅ Resumed from epoch {checkpoint['epoch']}, "
+    log_and_print(f"✅ Resumed from epoch {checkpoint['epoch']}, "
           f"step {checkpoint['step']}")
-    print(f"Last recorded loss: {checkpoint['loss']:.4f}")
+    log_and_print(f"Last recorded loss: {checkpoint['loss']:.4f}")
     
     # Continue training by passing the checkpoint to train_model
     return train_model(model, args, checkpoint=checkpoint)
@@ -324,8 +307,7 @@ def save_final_model(model, args):
         'training_args': vars(args)  # Save training arguments for reference
     }, final_model_path)
     
-    print(f"🎯 Final model saved to: {final_model_path}")
-    logging.info(f"Final model saved to: {final_model_path}")
+    log_and_print(f"🎯 Final model saved to: {final_model_path}")
     
     # Save model in a format that can be easily loaded
     model_info_path = os.path.join(final_model_dir, "model_info.txt")
@@ -367,7 +349,7 @@ def main():
         dropout=args.dropout
     )
     
-    print(f"\n🤖 Model initialized with "
+    log_and_print(f"\n🤖 Model initialized with "
           f"{sum(p.numel() for p in model.parameters()):,} parameters")
     
     # Check if resuming from checkpoint
