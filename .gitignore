@@ -4,3 +4,6 @@ data/
 __pycache__/
 checkpoints/
 logs/
+102 Tokenization/*.json
+102 Tokenization/*.txt
+103 Train/*.txt
