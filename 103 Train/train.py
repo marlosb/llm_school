@@ -21,9 +21,12 @@ def save_checkpoint(model,
                     filename_prefix):
     
     os.makedirs(checkpoint_dir, exist_ok=True)
+    # Generate datetime string: YYYYMMDD_HHMM
+    datetime_str = time.strftime('%Y%m%d_%H%M')
+
     checkpoint_path = os.path.join(
         checkpoint_dir, 
-        f"{filename_prefix}_epoch{epoch}_step{step}.pt"
+        f"checkpoint_{datetime_str}.pt"
     )
     torch.save({
         'epoch': epoch,
@@ -293,6 +296,62 @@ def resume_training(model, args):
     # Continue training by passing the checkpoint to train_model
     return train_model(model, args, checkpoint=checkpoint)
 
+def save_final_model(model, args):
+    """Save the final trained model."""
+    
+    # Create final models directory
+    final_model_dir = os.path.join(args.checkpoint_dir, "final_model")
+    os.makedirs(final_model_dir, exist_ok=True)
+    
+    # Unwrap model if it's wrapped with DataParallel
+    if isinstance(model, nn.DataParallel):
+        model_to_save = model.module
+    else:
+        model_to_save = model
+    
+    # Save the full model
+    final_model_path = os.path.join(final_model_dir, "final.pt")
+    torch.save({
+        'model_state_dict': model_to_save.state_dict(),
+        'model_config': {
+            'vocab_size': args.vocab_size,
+            'max_position': args.max_position,
+            'embed_dim': args.embed_dim,
+            'num_layers': args.num_layers,
+            'num_heads': args.num_heads,
+            'dropout': args.dropout
+        },
+        'training_args': vars(args)  # Save training arguments for reference
+    }, final_model_path)
+    
+    print(f"🎯 Final model saved to: {final_model_path}")
+    logging.info(f"Final model saved to: {final_model_path}")
+    
+    # Also save just the state dict for easier loading
+    state_dict_path = os.path.join(final_model_dir, "model_state_dict.pt")
+    torch.save(model_to_save.state_dict(), state_dict_path)
+    
+    print(f"🎯 Model state dict saved to: {state_dict_path}")
+    logging.info(f"Model state dict saved to: {state_dict_path}")
+    
+    # Save model in a format that can be easily loaded
+    model_info_path = os.path.join(final_model_dir, "model_info.txt")
+    with open(model_info_path, 'w') as f:
+        f.write("Final Trained Model Information:\n")
+        f.write("=" * 40 + "\n")
+        f.write(f"Model Parameters: {sum(p.numel() for p in model_to_save.parameters()):,}\n")
+        f.write(f"Vocab Size: {args.vocab_size}\n")
+        f.write(f"Max Position: {args.max_position}\n")
+        f.write(f"Embed Dim: {args.embed_dim}\n")
+        f.write(f"Num Layers: {args.num_layers}\n")
+        f.write(f"Num Heads: {args.num_heads}\n")
+        f.write(f"Dropout: {args.dropout}\n")
+        f.write(f"Training completed: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+    
+    print(f"📄 Model info saved to: {model_info_path}")
+    
+    return final_model_path
+
 # Main function
 def main():
     """Main training function."""
@@ -320,9 +379,13 @@ def main():
     
     # Check if resuming from checkpoint
     if args.resume_from_checkpoint:
-        resume_training(model, args)
+        final_model = resume_training(model, args)
     else:
-        train_model(model, args)
+        final_model = train_model(model, args)
+    
+    # Save the final trained model
+    if final_model is not None:
+        save_final_model(final_model, args)
 
 if __name__ == "__main__":
     main()
