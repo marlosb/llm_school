@@ -327,13 +327,6 @@ def save_final_model(model, args):
     print(f"🎯 Final model saved to: {final_model_path}")
     logging.info(f"Final model saved to: {final_model_path}")
     
-    # Also save just the state dict for easier loading
-    state_dict_path = os.path.join(final_model_dir, "model_state_dict.pt")
-    torch.save(model_to_save.state_dict(), state_dict_path)
-    
-    print(f"🎯 Model state dict saved to: {state_dict_path}")
-    logging.info(f"Model state dict saved to: {state_dict_path}")
-    
     # Save model in a format that can be easily loaded
     model_info_path = os.path.join(final_model_dir, "model_info.txt")
     with open(model_info_path, 'w') as f:
