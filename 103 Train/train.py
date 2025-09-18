@@ -81,11 +81,13 @@ def train_model(model, args, checkpoint=None):
         model = model.to(device)
 
         # Then wrap with DataParallel if multiple GPUs are available
-        if torch.cuda.is_available() and torch.cuda.device_count() > 1:
-            print(f"\t🚀 Using {torch.cuda.device_count()} GPUs with DataParallel")
+        device_count = torch.cuda.device_count()
+        if torch.cuda.is_available() and device_count > 1:
+            print(f"\t🚀 Using {device_count} GPUs with DataParallel")
             model = nn.DataParallel(model)
         else:
-            print(f"\t💻 Using single {'GPU' if torch.cuda.is_available() else 'CPU'}")
+            print(f"\t💻 Using single "
+                  f"{'GPU' if torch.cuda.is_available() else 'CPU'}")
     else:
         # For resumed training, model is already set up
         device = next(model.parameters()).device
@@ -105,7 +107,8 @@ def train_model(model, args, checkpoint=None):
 
     # Training loop with batch loading support
     model.train()
-    global_step = checkpoint.get('step', 0) if is_resuming else 0  # Resume from saved step or start from 0
+    # Resume from saved step or start from 0
+    global_step = checkpoint.get('step', 0) if is_resuming else 0  
     
     # Process all batches
     while True:
@@ -149,8 +152,10 @@ def train_model(model, args, checkpoint=None):
 
                 total_loss += loss_val.item()
                 # Calculate average loss properly for both fresh and resumed training
-                steps_in_current_session = global_step - (checkpoint.get('step', 0) if is_resuming else 0)
-                avg_loss = total_loss / steps_in_current_session if steps_in_current_session > 0 else loss_val.item()
+                steps_in_current_session = (global_step 
+                            - (checkpoint.get('step', 0) if is_resuming else 0))
+                avg_loss = (total_loss / steps_in_current_session 
+                           if steps_in_current_session > 0 else loss_val.item())
 
                 # Log progress
                 if global_step % args.progress_freq == 0:
@@ -206,7 +211,7 @@ def train_model(model, args, checkpoint=None):
 
         # Mark current batch as processed after saving checkpoint
         dataset._mark_current_batch_as_processed()
-        print(f"✅ Marked batch {batch_info['current_batch']} files as processed")
+        print(f"✅ Marked batch {batch_info['current_batch']} as processed")
 
         # Check if we need to load next batch
         if not dataset.has_next_batch():
@@ -221,10 +226,12 @@ def train_model(model, args, checkpoint=None):
         
         # Show info about newly loaded batch
         new_batch_info = dataset.get_batch_info()
-        print(f"✅ Successfully loaded batch {new_batch_info['current_batch']}/"
-              f"{new_batch_info['total_batches']}")
-        print(f"   Files in new batch: {new_batch_info['files_in_current_batch']}")
-        print(f"   Sequences in new batch: {new_batch_info['sequences_in_current_batch']}")
+        print(f"✅ Successfully loaded batch {new_batch_info['current_batch']}"
+              f"/{new_batch_info['total_batches']}")
+        print(f"\tFiles in new batch: "
+              f"{new_batch_info['files_in_current_batch']}")
+        print(f"\tSequences in new batch: "
+              f"{new_batch_info['sequences_in_current_batch']}")
 
     # Final summary
     final_progress = dataset.get_overall_progress()
@@ -271,7 +278,7 @@ def resume_training(model, args):
         print(f"\t🚀 Using {torch.cuda.device_count()} GPUs with DataParallel")
         model = nn.DataParallel(model)
     else:
-        print(f"\t💻 Using single {'GPU' if torch.cuda.is_available() else 'CPU'}")
+        print(f"\t💻 Using 1 {'GPU' if torch.cuda.is_available() else 'CPU'}")
     
     print(f"✅ Resumed from epoch {checkpoint['epoch']}, "
           f"step {checkpoint['step']}")
