@@ -191,15 +191,16 @@ def train_model(model, args, checkpoint=None):
             # Calculate epoch time and total training time elapsed
             epoch_end_time = time.time()
             epoch_duration = epoch_end_time - epoch_start_time
+            batch_duration = epoch_end_time - batch_start_time
             total_elapsed = epoch_end_time - overall_start_time
             # Format time nicely with timedelta
-            epoch_time_str = str(timedelta(seconds=int(epoch_duration)))
+            batch_time_str = str(timedelta(seconds=int(batch_duration)))
             total_time_str = str(timedelta(seconds=int(total_elapsed)))
 
             # Epoch summary
             log_and_print(
                 f" Epoch {epoch+1} done. Avg Loss: {avg_loss:.4f}, "
-                f"Epoch time: {epoch_time_str}, "
+                f"Batch time: {batch_time_str}, "
                 f"Total time: {total_time_str}"
             )
                     
