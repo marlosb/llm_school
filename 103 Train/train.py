@@ -35,11 +35,14 @@ def save_checkpoint(model,
         'optimizer_state_dict': optimizer.state_dict(),
         'loss': loss
     }, checkpoint_path)
-    log_and_print(f"Checkpoint saved: {checkpoint_path}")
+    log_and_print(f" Checkpoint saved: {checkpoint_path}")
 
 # Training function with file tracking
 def train_model(model, args, checkpoint=None):
     """Train model using parsed arguments. Can resume from checkpoint if provided."""
+    
+    # Track overall training time
+    overall_start_time = time.time()
     
     # Determine if we're resuming
     is_resuming = checkpoint is not None
@@ -61,13 +64,13 @@ def train_model(model, args, checkpoint=None):
     
     # Check if there's data to process
     if len(dataset) == 0:
-        log_and_print("✅ All files have been processed! Training complete.")
+        log_and_print("All files have been processed! Training complete.")
         return
     
     # Show batch and overall progress info
     batch_info = dataset.get_batch_info()
     progress = dataset.get_overall_progress()
-    print(f"📊 Training Progress:")
+    print(f"Training Progress:")
     print(f"  Total files: {progress['total_files']}")
     print(f"  Already processed: {progress['processed_files']}")
     print(f"  Remaining files: {progress['remaining_files']}")
@@ -85,7 +88,7 @@ def train_model(model, args, checkpoint=None):
         # Then wrap with DataParallel if multiple GPUs are available
         device_count = torch.cuda.device_count()
         if torch.cuda.is_available() and device_count > 1:
-            print(f"\t🚀 Using {device_count} GPUs with DataParallel")
+            print(f"\tUsing {device_count} GPUs with DataParallel")
             model = nn.DataParallel(model, device_ids=list(range(device_count)))
 
             # Print memory usage for each GPU
@@ -94,12 +97,12 @@ def train_model(model, args, checkpoint=None):
                 total = torch.cuda.get_device_properties(i).total_memory / 1e9
                 print(f"\t  GPU {i}: {allocated:.1f}GB / {total:.1f}GB allocated")
         else:
-            print(f"\t💻 Using single "
+            print(f"\tUsing single "
                   f"{'GPU' if torch.cuda.is_available() else 'CPU'}")
     else:
         # For resumed training, model is already set up
         device = next(model.parameters()).device
-        print(f"\t🔄 Resuming with model already configured")
+        print(f"\tResuming with model already configured")
 
     optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate)
     
@@ -107,9 +110,9 @@ def train_model(model, args, checkpoint=None):
     if is_resuming and 'optimizer_state_dict' in checkpoint:
         try:
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            log_and_print("✅ Optimizer state restored")
+            log_and_print("Optimizer state restored")
         except Exception as e:
-            log_and_print(f"⚠️ Could not restore optimizer state: {e}", 'warning')
+            log_and_print(f"Could not restore optimizer state: {e}", 'warning')
     
     criterion = nn.CrossEntropyLoss(ignore_index=-100)
 
@@ -120,21 +123,28 @@ def train_model(model, args, checkpoint=None):
     
     # Process all batches
     while True:
+        # Track batch processing time
+        batch_start_time = time.time()
+        
         # Show current batch info
         batch_info = dataset.get_batch_info()
-        print(f"\n🔄 Processing batch {batch_info['current_batch']}/"
+        print(f"\nProcessing batch {batch_info['current_batch']}/"
               f"{batch_info['total_batches']}")
         print(f"   Files in batch: {batch_info['files_in_current_batch']}")
         print(f"   Sequences in batch: "
-              f"{batch_info['sequences_in_current_batch']}")
+              f"{batch_info['sequences_in_current_batch']}\n")
         
         dataloader = DataLoader(
             dataset, batch_size=args.batch_size, shuffle=True
         )
         
+        # Initialize avg_loss for this batch
+        avg_loss = 0.0
+        
         for epoch in range(args.num_epochs):
             epoch_start_time = time.time()
             total_loss = 0
+            avg_loss = 0.0  # Initialize avg_loss for the epoch
             
             for batch_idx, batch in enumerate(dataloader):
                 global_step += 1
@@ -168,31 +178,31 @@ def train_model(model, args, checkpoint=None):
                 # Log progress
                 if global_step % args.progress_freq == 0:
                     progress = dataset.get_overall_progress()
-                    duration = time.time() - epoch_start_time
+                    epoch_duration = time.time() - epoch_start_time
                     # Format time nicely with timedelta
-                    time_str = str(timedelta(seconds=int(duration))) 
+                    epoch_time_str = str(timedelta(seconds=int(epoch_duration))) 
                     log_and_print(
-                        f"Epoch {epoch+1}, Step {global_step}, "
-                        f"Loss: {loss_val.item():.3f}, "
-                        f"Avg Loss: {avg_loss:.3f}, "
-                        f"Time: {time_str}"
+                        f"  Epoch {epoch+1}, Step {global_step}, "
+                        f"Loss: {loss_val.item():.2f}, "
+                        f"Avg Loss: {avg_loss:.2f}, "
+                        f"Epoch time: {epoch_time_str}"
                     )
 
-            # Calculate epoch time
+            # Calculate epoch time and total training time elapsed
             epoch_end_time = time.time()
             epoch_duration = epoch_end_time - epoch_start_time
+            total_elapsed = epoch_end_time - overall_start_time
             # Format time nicely with timedelta
-            time_str = str(timedelta(seconds=int(epoch_duration)))    
+            epoch_time_str = str(timedelta(seconds=int(epoch_duration)))
+            total_time_str = str(timedelta(seconds=int(total_elapsed)))
 
             # Epoch summary
-            progress = dataset.get_overall_progress()
             log_and_print(
-                f"Epoch {epoch+1} completed. Average Loss: {avg_loss:.4f}, "
-                f"Time: {time_str}, "
-                f"Overall progress: "
-                f"{progress['overall_progress_percent']:.1f}%"
+                f" Epoch {epoch+1} done. Avg Loss: {avg_loss:.4f}, "
+                f"Epoch time: {epoch_time_str}, "
+                f"Total time: {total_time_str}"
             )
-        
+                    
         # Save checkpoint after completing current batch
         if isinstance(model, nn.DataParallel):
             model_to_save = model.module
@@ -202,45 +212,64 @@ def train_model(model, args, checkpoint=None):
             model_to_save, optimizer, args.num_epochs, global_step, avg_loss, 
             args.checkpoint_dir, 'distilgpt2_batch_complete'
         )
-        log_and_print(f"💾 Checkpoint saved after completing batch "
+        log_and_print(f" Checkpoint saved after completing batch "
               f"{batch_info['current_batch']}")
 
         # Mark current batch as processed after saving checkpoint
         dataset._mark_current_batch_as_processed()
-        log_and_print(f"✅ Marked batch {batch_info['current_batch']} as processed")
+        log_and_print(f" Marked batch {batch_info['current_batch']} as processed")
+
+         # Calculate total batch processing time and total elapsed time
+        progress = dataset.get_overall_progress()
+        batch_end_time = time.time()
+        batch_duration = batch_end_time - batch_start_time
+        total_elapsed = batch_end_time - overall_start_time
+        batch_time_str = str(timedelta(seconds=int(batch_duration)))
+        total_time_str = str(timedelta(seconds=int(total_elapsed)))
+        log_and_print(f"Batch {batch_info['current_batch']} completed in "
+                      f"{batch_time_str}, Total time: {total_time_str}, "
+                      f"Overall progress: "
+                      f"{progress['overall_progress_percent']:.1f}%\n"
+                )
 
         # Check if we need to load next batch
         if not dataset.has_next_batch():
-            log_and_print("✅ All batches processed!")
+            log_and_print("All batches processed!")
             break
 
         # Load next batch
-        print(f"🔄 Loading next batch...")
+        print(f"Loading next batch...")
         if not dataset.load_next_batch():
             print("❌ Failed to load next batch!")
             break
         
         # Show info about newly loaded batch
         new_batch_info = dataset.get_batch_info()
-        print(f"✅ Successfully loaded batch {new_batch_info['current_batch']}"
+        print(f"Successfully loaded batch {new_batch_info['current_batch']}"
               f"/{new_batch_info['total_batches']}")
         print(f"\tFiles in new batch: "
               f"{new_batch_info['files_in_current_batch']}")
         print(f"\tSequences in new batch: "
               f"{new_batch_info['sequences_in_current_batch']}")
 
+    # Calculate overall training time
+    overall_end_time = time.time()
+    overall_duration = overall_end_time - overall_start_time
+    overall_time_str = str(timedelta(seconds=int(overall_duration)))
+    
     # Final summary
     final_progress = dataset.get_overall_progress()
     log_and_print(
         f"Training completed. "
-        f"Final progress: {final_progress['overall_progress_percent']:.1f}%"
+        f"Final progress: {final_progress['overall_progress_percent']:.1f}%, "
+        f"Total training time: {overall_time_str}"
     )
     
     if final_progress['remaining_files'] > 0:
-        print(f"⚠️  {final_progress['remaining_files']} files still "
+        print(f"{final_progress['remaining_files']} files still "
               "unprocessed. Run again to continue.")
     else:
-        print("🎉 All files have been processed!")
+        print("All files have been processed!")
 
     # Mark the last batch as processed when training completes
     dataset.finalize_training()
@@ -252,7 +281,7 @@ def train_model(model, args, checkpoint=None):
 def resume_training(model, args):
     """Resume training from a checkpoint."""
     
-    log_and_print(f"🔄 Resuming training from checkpoint: "
+    log_and_print(f"Resuming training from checkpoint: "
           f"{args.resume_from_checkpoint}")
     
     # Load checkpoint
@@ -267,12 +296,12 @@ def resume_training(model, args):
 
     # Handle DataParallel wrapping AFTER loading state dict
     if torch.cuda.is_available() and torch.cuda.device_count() > 1:
-        log_and_print(f"\t🚀 Using {torch.cuda.device_count()} GPUs with DataParallel")
+        log_and_print(f"\tUsing {torch.cuda.device_count()} GPUs with DataParallel")
         model = nn.DataParallel(model)
     else:
-        log_and_print(f"\t💻 Using 1 {'GPU' if torch.cuda.is_available() else 'CPU'}")
+        log_and_print(f"\tUsing 1 {'GPU' if torch.cuda.is_available() else 'CPU'}")
     
-    log_and_print(f"✅ Resumed from epoch {checkpoint['epoch']}, "
+    log_and_print(f"Resumed from epoch {checkpoint['epoch']}, "
           f"step {checkpoint['step']}")
     log_and_print(f"Last recorded loss: {checkpoint['loss']:.4f}")
     
@@ -311,8 +340,8 @@ def save_final_model(model, args):
         'training_args': vars(args)  # Save training arguments for reference
     }, final_model_path)
     
-    log_and_print(f"🎯 Complete model saved to: {complete_model_path}")
-    log_and_print(f"🎯 State dict saved to: {final_model_path}")
+    log_and_print(f"Complete model saved to: {complete_model_path}")
+    log_and_print(f"State dict saved to: {final_model_path}")
     
     # Save model in a format that can be easily loaded
     model_info_path = os.path.join(final_model_dir, "model_info.txt")
@@ -328,7 +357,7 @@ def save_final_model(model, args):
         f.write(f"Dropout: {args.dropout}\n")
         f.write(f"Training completed: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
     
-    print(f"📄 Model info saved to: {model_info_path}")
+    print(f"Model info saved to: {model_info_path}")
     
     return final_model_path
 
@@ -354,7 +383,7 @@ def main():
         dropout=args.dropout
     )
     
-    log_and_print(f"\n🤖 Model initialized with "
+    log_and_print(f"\nModel initialized with "
           f"{sum(p.numel() for p in model.parameters()):,} parameters")
     
     # Check if resuming from checkpoint

@@ -177,7 +177,7 @@ class TokenizedDataset(Dataset):
                     boundary['processed'] = True
                     f.write(f"{boundary['file_path']}\n")
                     file_name = Path(boundary['file_path']).name
-                    log_and_print(f"Marked file as processed: {file_name}")
+                    log_and_print(f" Marked file as processed: {file_name}")
 
     def finalize_training(self):
         """Call this at the end of training to mark the last batch as processed."""
