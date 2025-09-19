@@ -21,7 +21,87 @@ def get_padding_token_id(tokenizer: PreTrainedTokenizerFast) -> int:
         # Default assumption
         return 0
 
-def validate_input_ids(input_ids: np.ndarray, vocab_size: int = 30000, max_length: int = 512) -> Dict[str, Any]:
+def validate_tokenizer_compatibility(tokenizer: PreTrainedTokenizerFast, token_sample: np.ndarray) -> Dict[str, Any]:
+    """Validate that the tokenizer is compatible with the tokenized data."""
+    
+    print("🔍 Validating Tokenizer Compatibility...")
+    print("-" * 50)
+    
+    results = {
+        'valid': True,
+        'issues': [],
+        'stats': {}
+    }
+    
+    # Get tokenizer info
+    vocab_size = tokenizer.vocab_size
+    print(f"Tokenizer vocabulary size: {vocab_size}")
+    print(f"Tokenizer type: {type(tokenizer).__name__}")
+    
+    # Check special tokens
+    special_tokens = {
+        'pad_token': tokenizer.pad_token,
+        'pad_token_id': tokenizer.pad_token_id,
+        'eos_token': tokenizer.eos_token,
+        'eos_token_id': tokenizer.eos_token_id,
+        'unk_token': tokenizer.unk_token,
+        'unk_token_id': tokenizer.unk_token_id,
+    }
+    
+    print(f"Special tokens:")
+    for name, value in special_tokens.items():
+        print(f"  {name}: {value}")
+    
+    # Test decoding with a small sample
+    sample_tokens = token_sample[:min(50, len(token_sample))]
+    
+    try:
+        # Test basic decoding
+        decoded = tokenizer.decode(sample_tokens, skip_special_tokens=False)
+        print(f"Sample decoded text (first 100 chars): {decoded[:100]}...")
+        
+        # Check for suspicious patterns that indicate tokenizer mismatch
+        suspicious_patterns = ['�', '▁', '[UNK]', '<unk>']
+        has_suspicious = any(pattern in decoded for pattern in suspicious_patterns)
+        
+        if has_suspicious:
+            results['issues'].append("Decoded text contains suspicious patterns indicating tokenizer mismatch")
+            print(f"⚠️  Suspicious patterns detected in decoded text")
+        
+        # Check if most tokens decode to reasonable text
+        if len(decoded.strip()) < len(sample_tokens) * 0.1:  # Very short decode suggests issues
+            results['issues'].append("Decoded text is suspiciously short")
+            print(f"⚠️  Decoded text is suspiciously short")
+            
+    except Exception as e:
+        results['valid'] = False
+        results['issues'].append(f"Decoding failed: {str(e)}")
+        print(f"❌ Decoding failed: {e}")
+    
+    # Test encoding-decoding round trip
+    try:
+        test_text = "Este é um teste de compatibilidade do tokenizer."
+        encoded = tokenizer.encode(test_text)
+        decoded_back = tokenizer.decode(encoded)
+        
+        if test_text.lower().strip() not in decoded_back.lower().strip():
+            results['issues'].append("Round-trip encoding-decoding test failed")
+            print(f"⚠️  Round-trip test failed")
+            print(f"  Original: {test_text}")
+            print(f"  Decoded:  {decoded_back}")
+        else:
+            print(f"✅ Round-trip encoding-decoding test passed")
+            
+    except Exception as e:
+        results['issues'].append(f"Round-trip test failed: {str(e)}")
+        print(f"⚠️  Round-trip test failed: {e}")
+    
+    results['stats'] = special_tokens
+    results['stats']['vocab_size'] = vocab_size
+    
+    return results
+
+def validate_input_ids(input_ids: np.ndarray, tokenizer: PreTrainedTokenizerFast, max_length: int = 512) -> Dict[str, Any]:
     """Validate input IDs according to DistilGPT2 requirements."""
     
     print("🔍 Validating Input IDs...")
@@ -32,6 +112,8 @@ def validate_input_ids(input_ids: np.ndarray, vocab_size: int = 30000, max_lengt
         'issues': [],
         'stats': {}
     }
+    
+    vocab_size = tokenizer.vocab_size
     
     # Check shape
     print(f"Shape: {input_ids.shape}")
@@ -72,13 +154,28 @@ def validate_input_ids(input_ids: np.ndarray, vocab_size: int = 30000, max_lengt
         results['valid'] = False
         results['issues'].append(f"Non-integer dtype: {input_ids.dtype}")
     
-    # Validate int16 range for our use case
+    # **CRITICAL FIX**: Check for data type compatibility with tokenization script
     if input_ids.dtype == np.int16:
-        if max_token > 32767 or min_token < -32768:
+        print("⚠️  Data is stored as int16, but tokenization script uses uint16")
+        print("   This mismatch can cause token interpretation errors!")
+        
+        # Check if values fit in uint16 range (0 to 65535)
+        if min_token < 0:
             results['valid'] = False
-            results['issues'].append(f"Token values outside int16 range: {min_token} to {max_token}")
+            results['issues'].append(f"int16 data contains negative values that don't map to uint16: min = {min_token}")
+        elif max_token > 65535:
+            results['valid'] = False
+            results['issues'].append(f"Token values exceed uint16 range: max = {max_token}")
         else:
-            print("✅ Token values fit properly in int16 range")
+            print("✅ Token values could fit in uint16 range, but dtype conversion needed")
+            
+    elif input_ids.dtype == np.uint16:
+        print("✅ Data type matches tokenization script (uint16)")
+        if max_token > vocab_size - 1:
+            results['valid'] = False
+            results['issues'].append(f"Token values exceed vocabulary: max = {max_token}, vocab_size = {vocab_size}")
+    else:
+        print(f"⚠️  Unexpected data type: {input_ids.dtype}")
     
     # Token statistics
     unique_tokens = len(np.unique(input_ids))
@@ -210,7 +307,7 @@ def validate_attention_masks(attention_masks: np.ndarray, input_ids: np.ndarray,
     return results
 
 def inspect_samples(dataset: TokenizedDataset, tokenizer: PreTrainedTokenizerFast, num_samples: int = 5):
-    """Inspect a few samples visually."""
+    """Inspect a few samples visually with enhanced debugging."""
     
     print(f"\n👀 Inspecting {num_samples} Random Samples...")
     print("=" * 80)
@@ -228,7 +325,9 @@ def inspect_samples(dataset: TokenizedDataset, tokenizer: PreTrainedTokenizerFas
         print(f"\nSample {i+1} (index {idx}):")
         print("-" * 40)
         print(f"Input IDs shape: {input_ids.shape}")
+        print(f"Input IDs dtype: {input_ids.dtype}")
         print(f"Attention mask shape: {attention_mask.shape}")
+        print(f"Attention mask dtype: {attention_mask.dtype}")
         
         # Show first 20 tokens
         print(f"First 20 tokens: {input_ids[:20].tolist()}")
@@ -237,6 +336,13 @@ def inspect_samples(dataset: TokenizedDataset, tokenizer: PreTrainedTokenizerFas
         # Show last 20 tokens (where padding usually is)
         print(f"Last 20 tokens:  {input_ids[-20:].tolist()}")
         print(f"Last 20 masks:   {attention_mask[-20:].tolist()}")
+        
+        # **ENHANCED**: Check token range for this specific sample
+        sample_min, sample_max = np.min(input_ids), np.max(input_ids)
+        print(f"Sample token range: {sample_min} to {sample_max}")
+        
+        if sample_max >= tokenizer.vocab_size:
+            print(f"⚠️  Sample contains tokens >= vocab_size ({tokenizer.vocab_size})")
         
         # Check for padding alignment in this sample
         padding_positions = attention_mask == 0
@@ -251,18 +357,46 @@ def inspect_samples(dataset: TokenizedDataset, tokenizer: PreTrainedTokenizerFas
         else:
             print("No padding found in this sequence")
         
-        # Decode tokens
+        # **ENHANCED**: More robust decoding with error handling
         try:
+            # Try decoding the full sequence
             decoded_text = tokenizer.decode(input_ids, skip_special_tokens=False)
-            print(f"Decoded (first 100 chars): {decoded_text[:100]}...")
+            print(f"Decoded (first 200 chars): {decoded_text[:200]}...")
+            
+            # Also try decoding just the first 10 tokens for debugging
+            sample_decode = tokenizer.decode(input_ids[:10], skip_special_tokens=False)
+            print(f"First 10 tokens decoded: '{sample_decode}'")
+            
+            # Check individual token decoding
+            problem_tokens = []
+            for j, token_id in enumerate(input_ids[:10]):
+                try:
+                    single_decode = tokenizer.decode([token_id], skip_special_tokens=False)
+                    if not single_decode.strip():
+                        problem_tokens.append((j, token_id))
+                except:
+                    problem_tokens.append((j, token_id))
+            
+            if problem_tokens:
+                print(f"⚠️  Problem tokens (first 10): {problem_tokens}")
+                
         except Exception as e:
-            print(f"Decoding error: {e}")
+            print(f"❌ Decoding error: {e}")
+            # Try to identify the problematic token
+            try:
+                for j in range(min(20, len(input_ids))):
+                    token_id = input_ids[j]
+                    if token_id >= tokenizer.vocab_size:
+                        print(f"  Token at position {j}: {token_id} >= vocab_size ({tokenizer.vocab_size})")
+            except:
+                pass
         
         # Statistics
         valid_tokens = np.sum(attention_mask)  
         padding_tokens_count = len(attention_mask) - valid_tokens
         print(f"Valid tokens: {valid_tokens}, Padding tokens: {padding_tokens_count}")
 
+# ...existing code...
 def test_with_model(dataset: TokenizedDataset, model_path: str = None, batch_size: int = 4):
     """Test data with the actual DistilGPT2 model."""
     
@@ -447,8 +581,8 @@ def main():
     
     args = parser.parse_args()
     
-    print("🚀 DistilGPT2 Data Validation (with Memory Optimization)")
-    print("=" * 60)
+    print("🚀 DistilGPT2 Data Validation (Enhanced with Tokenizer Compatibility)")
+    print("=" * 70)
     
     # Configuration from arguments
     data_dir = args.data_dir
@@ -467,10 +601,13 @@ def main():
         
         # Print tokenizer padding info
         print(f"\n📋 Tokenizer Configuration:")
+        print(f"  Vocabulary size: {tokenizer.vocab_size}")
         print(f"  Padding token: {tokenizer.pad_token}")
         print(f"  Padding token ID: {tokenizer.pad_token_id}")
         print(f"  EOS token: {tokenizer.eos_token}")
         print(f"  EOS token ID: {tokenizer.eos_token_id}")
+        print(f"  UNK token: {tokenizer.unk_token}")
+        print(f"  UNK token ID: {tokenizer.unk_token_id}")
         print(f"  Note: Tokenizer script sets pad_token = eos_token")
         
         # Load dataset with batch size
@@ -497,12 +634,19 @@ def main():
               f"{batch_info['total_batches']} "
               f"({batch_info['files_in_current_batch']} files)")
         
-        # Validation steps
+        # **NEW**: First validate tokenizer compatibility
         validation_results = {}
         
-        # 1. Validate input IDs
+        # Get a sample for tokenizer testing
+        if len(input_ids) > 0:
+            sample_tokens = input_ids[0] if len(input_ids.shape) > 1 else input_ids[:100]
+            validation_results['tokenizer'] = validate_tokenizer_compatibility(
+                tokenizer, sample_tokens
+            )
+        
+        # 1. Validate input IDs (now with tokenizer parameter)
         validation_results['input_ids'] = validate_input_ids(
-            input_ids, vocab_size, max_length
+            input_ids, tokenizer, max_length
         )
         
         # 2. Validate attention masks
@@ -513,16 +657,16 @@ def main():
         # 3. Print data statistics
         print_data_statistics(input_ids, attention_masks)
         
-        # 4. Inspect samples
+        # 4. Inspect samples (enhanced version)
         inspect_samples(dataset, tokenizer, num_samples=3)
         
         # 5. Test with model
         test_with_model(dataset, batch_size=2)
         
         # Final report
-        print("\n" + "=" * 60)
+        print("\n" + "=" * 70)
         print("📋 FINAL VALIDATION REPORT")
-        print("=" * 60)
+        print("=" * 70)
         
         all_valid = True
         for component, results in validation_results.items():
@@ -534,7 +678,7 @@ def main():
                 for issue in results['issues']:
                     print(f"  - {issue}")
         
-        print("\n" + "-" * 60)
+        print("\n" + "-" * 70)
         if all_valid:
             print("🎉 ALL VALIDATIONS PASSED!")
             print("Your data is ready for training with DistilGPT2!")
@@ -552,21 +696,30 @@ def main():
                 for results in validation_results.values() 
                 for issue in results.get('issues', [])
             )
-            if has_padding_issues:
-                print("\n💡 Padding Alignment Fix:")
-                print("   The attention masks don't align with the "
-                      "expected padding token.")
-                print("   This might be because:")
-                print("   1. The tokenizer's pad_token_id is different "
-                      "from what's expected")
-                print("   2. The tokenization process used a different "
-                      "padding token") 
-                print("   3. The data was preprocessed with different "
-                      "settings")
-                print("   4. Check if the tokenizer script used the same "
-                      "tokenizer as validation")
+            has_tokenizer_issues = any(
+                'tokenizer' in issue.lower() or 'decoding' in issue.lower()
+                for results in validation_results.values() 
+                for issue in results.get('issues', [])
+            )
+            
+            if has_tokenizer_issues:
+                print("\n💡 Tokenizer Compatibility Issues:")
+                print("   The tokenizer used for validation doesn't match the one used for tokenization.")
+                print("   Potential fixes:")
+                print("   1. Ensure you're using the same tokenizer path for both tokenization and validation")
+                print("   2. Check if the tokenizer was updated after tokenization")
+                print("   3. Verify the tokenizer vocabulary size matches your data")
+                print("   4. Consider re-tokenizing with the correct tokenizer")
                 
-        print("=" * 60)
+            if has_padding_issues:
+                print("\n💡 Padding Alignment Issues:")
+                print("   The attention masks don't align with the expected padding token.")
+                print("   Potential fixes:")
+                print("   1. Check if pad_token was properly set during tokenization")
+                print("   2. Verify the tokenizer script used the same pad_token setting")
+                print("   3. Consider re-tokenizing with correct padding configuration")
+                
+        print("=" * 70)
         
     except Exception as e:
         print(f"❌ Validation failed with error: {e}")
