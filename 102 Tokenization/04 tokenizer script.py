@@ -54,38 +54,54 @@ def parallel_tokenize(worker_id: int,
     print(f"{now()}: Worker {worker_id} started")
 
     def tokenize_batch(text_batch, max_length):
-
         all_input_ids = []
         all_attention_masks = []
 
-         # Process each text individually - much simpler approach
+        # Process each text individually
         for text in text_batch:
-            # Tokenize without return_tensors first to get Python lists
+            # First, tokenize WITHOUT the post-processor to avoid automatic EOS
+            # We'll add EOS manually only to the last chunk
             tokenized = worker_tokenizer(
                 text,
-                padding="max_length",
+                padding=False,  # Don't pad yet
                 truncation=True,
                 max_length=max_length,
                 stride=60,
                 return_attention_mask=True,
                 return_overflowing_tokens=True,
-                return_tensors=None  # Get Python lists, not tensors
+                return_tensors=None,
+                add_special_tokens=False
             )
 
             # Extract the lists - these are guaranteed to be Python lists now
             input_ids_list = tokenized['input_ids']
             attention_mask_list = tokenized['attention_mask']
             
-            # Handle single vs multiple chunks - input_ids_list is either:
-            # - A single list [101, 2054, ...] for no chunking
-            # - A list of lists [[101, 2054, ...], [2003, 1996, ...]] for chunking
+            # Handle single vs multiple chunks
             if isinstance(input_ids_list[0], int):
-                # Single chunk case - wrap in another list
+                # Single chunk case
                 input_ids_list = [input_ids_list]
                 attention_mask_list = [attention_mask_list]
-            
-            # Add all chunks to our collections
-            for chunk_ids, chunk_mask in zip(input_ids_list, attention_mask_list):
+                
+            # Process chunks and add EOS only to the last one (INDENTED CORRECTLY!)
+            for chunk_idx, (chunk_ids, chunk_mask) in enumerate(zip(input_ids_list, attention_mask_list)):
+                is_last_chunk = (chunk_idx == len(input_ids_list) - 1)
+                
+                # Add EOS only to the last chunk
+                if is_last_chunk:
+                    chunk_ids = chunk_ids + [worker_tokenizer.eos_token_id]
+                    chunk_mask = chunk_mask + [1]  # EOS is a valid token
+                
+                # Now pad to max_length
+                padding_length = max_length - len(chunk_ids)
+                if padding_length > 0:
+                    chunk_ids = chunk_ids + [worker_tokenizer.pad_token_id] * padding_length
+                    chunk_mask = chunk_mask + [0] * padding_length
+                elif padding_length < 0:
+                    # Truncate if somehow too long
+                    chunk_ids = chunk_ids[:max_length]
+                    chunk_mask = chunk_mask[:max_length]
+                
                 all_input_ids.append(chunk_ids)
                 all_attention_masks.append(chunk_mask)
 
@@ -94,8 +110,8 @@ def parallel_tokenize(worker_id: int,
         all_attention_masks = np.array(all_attention_masks, dtype=np.bool_)
             
         print_text = (f"{now()}: Worker {worker_id}: created ",
-                      f"{len(all_input_ids)} chunks from {len(text_batch)}",
-                      f" original texts")
+                    f"{len(all_input_ids)} chunks from {len(text_batch)}",
+                    f" original texts")
         print(''.join(print_text))
 
         return all_input_ids, all_attention_masks
