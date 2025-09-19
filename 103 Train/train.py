@@ -114,7 +114,7 @@ def train_model(model, args, checkpoint=None):
         except Exception as e:
             log_and_print(f"Could not restore optimizer state: {e}", 'warning')
     
-    criterion = nn.CrossEntropyLoss(ignore_index=-100)
+    criterion = nn.CrossEntropyLoss(ignore_index=1)
 
     # Training loop with batch loading support
     model.train()
