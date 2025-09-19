@@ -396,6 +396,245 @@ def inspect_samples(dataset: TokenizedDataset, tokenizer: PreTrainedTokenizerFas
         padding_tokens_count = len(attention_mask) - valid_tokens
         print(f"Valid tokens: {valid_tokens}, Padding tokens: {padding_tokens_count}")
 
+def analyze_eos_in_chunks(dataset: TokenizedDataset, tokenizer: PreTrainedTokenizerFast, num_samples: int = 1000):
+    """Analyze if chunks have EOS tokens where they shouldn't."""
+    
+    print(f"\n🔍 Analyzing EOS Token Placement in Chunks...")
+    print("=" * 60)
+    
+    sequences_with_early_eos = 0
+    sequences_with_proper_eos = 0
+    sequences_without_eos = 0
+    total_sequences = min(num_samples, len(dataset))
+    
+    eos_token_id = tokenizer.eos_token_id
+    pad_token_id = get_padding_token_id(tokenizer)
+    
+    print(f"Analyzing {total_sequences} sequences...")
+    print(f"EOS token ID: {eos_token_id}")
+    print(f"PAD token ID: {pad_token_id}")
+    
+    early_eos_examples = []
+    
+    for i in range(total_sequences):
+        sample = dataset[i]
+        input_ids = sample['input_ids'].numpy()
+        attention_mask = sample['attention_mask'].numpy()
+        
+        # Find all EOS positions
+        eos_positions = np.where(input_ids == eos_token_id)[0]
+        
+        if len(eos_positions) == 0:
+            sequences_without_eos += 1
+            continue
+        
+        # Find the last valid (non-padding) position
+        if attention_mask.dtype == np.bool_:
+            valid_positions = np.where(attention_mask)[0]
+        else:
+            valid_positions = np.where(attention_mask == 1)[0]
+        
+        if len(valid_positions) == 0:
+            continue  # Skip if no valid tokens (shouldn't happen)
+        
+        last_valid_pos = valid_positions[-1]
+        
+        # Check EOS placement
+        has_early_eos = False
+        has_proper_eos = False
+        
+        for eos_pos in eos_positions:
+            if eos_pos == last_valid_pos:
+                # EOS is at the last valid position - this is correct for final chunks
+                has_proper_eos = True
+            elif eos_pos < last_valid_pos:
+                # EOS appears before the end of valid tokens - this is problematic
+                has_early_eos = True
+                
+                # Store example for detailed analysis
+                if len(early_eos_examples) < 5:
+                    early_eos_examples.append({
+                        'sequence_idx': i,
+                        'eos_pos': eos_pos,
+                        'last_valid_pos': last_valid_pos,
+                        'tokens_around_eos': input_ids[max(0, eos_pos-5):eos_pos+6].tolist(),
+                        'masks_around_eos': attention_mask[max(0, eos_pos-5):eos_pos+6].tolist()
+                    })
+        
+        if has_early_eos:
+            sequences_with_early_eos += 1
+        elif has_proper_eos:
+            sequences_with_proper_eos += 1
+    
+    # Calculate statistics
+    early_eos_percentage = (sequences_with_early_eos / total_sequences) * 100
+    proper_eos_percentage = (sequences_with_proper_eos / total_sequences) * 100
+    no_eos_percentage = (sequences_without_eos / total_sequences) * 100
+    
+    print(f"\n📊 EOS Analysis Results:")
+    print(f"  Sequences with EOS in middle: {sequences_with_early_eos}/{total_sequences} ({early_eos_percentage:.1f}%)")
+    print(f"  Sequences with proper EOS: {sequences_with_proper_eos}/{total_sequences} ({proper_eos_percentage:.1f}%)")
+    print(f"  Sequences without EOS: {sequences_without_eos}/{total_sequences} ({no_eos_percentage:.1f}%)")
+    
+    # Show detailed examples of problematic sequences
+    if early_eos_examples:
+        print(f"\n🚨 Examples of Problematic EOS Placement:")
+        for example in early_eos_examples:
+            print(f"\n  Sequence {example['sequence_idx']}:")
+            print(f"    EOS position: {example['eos_pos']}")
+            print(f"    Last valid position: {example['last_valid_pos']}")
+            print(f"    Tokens around EOS: {example['tokens_around_eos']}")
+            print(f"    Masks around EOS:  {example['masks_around_eos']}")
+            
+            # Try to decode the problematic area
+            try:
+                decoded_segment = tokenizer.decode(example['tokens_around_eos'], skip_special_tokens=False)
+                print(f"    Decoded segment: '{decoded_segment}'")
+            except:
+                print(f"    Could not decode segment")
+    
+    # Assessment and recommendations
+    print(f"\n🎯 Assessment:")
+    if early_eos_percentage > 15:
+        print(f"❌ CRITICAL ISSUE: {early_eos_percentage:.1f}% of sequences have EOS in the middle!")
+        print(f"   This means intermediate chunks are getting EOS tokens.")
+        print(f"   The model learned that EOS is very common, causing generation bias.")
+        
+        print(f"\n💡 Recommendations:")
+        print(f"   1. 🔄 Re-tokenize data with the corrected tokenizer script")
+        print(f"   2. 🏗️ Ensure only final chunks get EOS tokens")
+        print(f"   3. 🚀 Retrain model with properly tokenized data")
+        print(f"   4. 🧪 The current model is biased and should not be used for generation")
+        
+    elif early_eos_percentage > 5:
+        print(f"⚠️  MODERATE ISSUE: {early_eos_percentage:.1f}% of sequences have misplaced EOS.")
+        print(f"   This could cause some generation bias.")
+        print(f"   Consider re-tokenizing if generation quality is poor.")
+        
+    elif early_eos_percentage > 1:
+        print(f"⚠️  MINOR ISSUE: {early_eos_percentage:.1f}% of sequences have misplaced EOS.")
+        print(f"   This is within acceptable range but monitor generation quality.")
+        
+    else:
+        print(f"✅ EXCELLENT: Only {early_eos_percentage:.1f}% have misplaced EOS tokens.")
+        print(f"   EOS placement looks correct for proper chunk handling.")
+    
+    if no_eos_percentage > 50:
+        print(f"\n⚠️  NOTE: {no_eos_percentage:.1f}% of sequences have no EOS token.")
+        print(f"   This is expected for intermediate chunks, but ensure final chunks have EOS.")
+    
+    return {
+        'total_analyzed': total_sequences,
+        'early_eos_count': sequences_with_early_eos,
+        'early_eos_percentage': early_eos_percentage,
+        'proper_eos_count': sequences_with_proper_eos,
+        'proper_eos_percentage': proper_eos_percentage,
+        'no_eos_count': sequences_without_eos,
+        'no_eos_percentage': no_eos_percentage,
+        'examples': early_eos_examples
+    }
+
+def analyze_token_distribution(dataset: TokenizedDataset, tokenizer: PreTrainedTokenizerFast, num_samples: int = 1000):
+    """Analyze the distribution of tokens to identify potential training bias."""
+    
+    print(f"\n📈 Analyzing Token Distribution for Training Bias...")
+    print("=" * 60)
+    
+    total_sequences = min(num_samples, len(dataset))
+    all_tokens = []
+    
+    # Collect tokens from samples
+    for i in range(total_sequences):
+        sample = dataset[i]
+        input_ids = sample['input_ids'].numpy()
+        attention_mask = sample['attention_mask'].numpy()
+        
+        # Only count valid (non-padding) tokens
+        if attention_mask.dtype == np.bool_:
+            valid_mask = attention_mask
+        else:
+            valid_mask = attention_mask == 1
+            
+        valid_tokens = input_ids[valid_mask]
+        all_tokens.extend(valid_tokens.tolist())
+    
+    # Calculate token frequencies
+    token_counts = {}
+    for token in all_tokens:
+        token_counts[token] = token_counts.get(token, 0) + 1
+    
+    # Sort by frequency
+    sorted_tokens = sorted(token_counts.items(), key=lambda x: x[1], reverse=True)
+    
+    # Special token analysis
+    special_tokens = {
+        'PAD': get_padding_token_id(tokenizer),
+        'EOS': tokenizer.eos_token_id,
+        'UNK': tokenizer.unk_token_id
+    }
+    
+    total_tokens = len(all_tokens)
+    print(f"Total valid tokens analyzed: {total_tokens:,}")
+    print(f"Unique tokens found: {len(token_counts):,}")
+    
+    print(f"\n🔍 Special Token Frequencies:")
+    for name, token_id in special_tokens.items():
+        if token_id is not None and token_id in token_counts:
+            count = token_counts[token_id]
+            percentage = (count / total_tokens) * 100
+            print(f"  {name} (ID {token_id}): {count:,} occurrences ({percentage:.2f}%)")
+            
+            # Check if EOS is too frequent
+            if name == 'EOS' and percentage > 3.0:
+                print(f"    ⚠️  EOS frequency is very high! This explains generation bias.")
+            elif name == 'EOS' and percentage > 1.5:
+                print(f"    ⚠️  EOS frequency is elevated. Monitor for generation bias.")
+            elif name == 'EOS':
+                print(f"    ✅ EOS frequency looks reasonable.")
+        else:
+            print(f"  {name}: Not found in data")
+    
+    print(f"\n🏆 Top 15 Most Frequent Tokens:")
+    for i, (token_id, count) in enumerate(sorted_tokens[:15]):
+        percentage = (count / total_tokens) * 100
+        try:
+            token_text = tokenizer.decode([token_id])
+            # Clean up the display
+            if token_text.strip() == '':
+                token_text = '<EMPTY>'
+            elif len(token_text) > 20:
+                token_text = token_text[:20] + '...'
+        except:
+            token_text = '<DECODE_ERROR>'
+        
+        print(f"  {i+1:2d}. ID {token_id:5d}: {count:8,} ({percentage:5.2f}%) -> '{token_text}'")
+    
+    # Check for extreme bias
+    if len(sorted_tokens) > 0:
+        most_frequent_count = sorted_tokens[0][1]
+        most_frequent_percentage = (most_frequent_count / total_tokens) * 100
+        
+        if most_frequent_percentage > 15:
+            print(f"\n❌ EXTREME BIAS DETECTED!")
+            print(f"   Most frequent token appears {most_frequent_percentage:.1f}% of the time!")
+            print(f"   This will severely impact model training and generation.")
+        elif most_frequent_percentage > 8:
+            print(f"\n⚠️  HIGH BIAS DETECTED!")
+            print(f"   Most frequent token appears {most_frequent_percentage:.1f}% of the time.")
+            print(f"   This may impact training quality.")
+        else:
+            print(f"\n✅ Token distribution looks reasonable.")
+            print(f"   Most frequent token: {most_frequent_percentage:.1f}% (healthy level)")
+    
+    return {
+        'total_tokens': total_tokens,
+        'unique_tokens': len(token_counts),
+        'top_tokens': sorted_tokens[:20],
+        'special_token_stats': {name: token_counts.get(token_id, 0) 
+                               for name, token_id in special_tokens.items() 
+                               if token_id is not None}
+    }
+
 # ...existing code...
 def test_with_model(dataset: TokenizedDataset, model_path: str = None, batch_size: int = 4):
     """Test data with the actual DistilGPT2 model."""
@@ -660,15 +899,24 @@ def main():
         # 4. Inspect samples (enhanced version)
         inspect_samples(dataset, tokenizer, num_samples=3)
         
-        # 5. Test with model
+        # 5. Analyze EOS token placement in chunks
+        eos_analysis = analyze_eos_in_chunks(dataset, tokenizer, num_samples=1000)
+        
+        # 6. Analyze token distribution for training bias
+        distribution_analysis = analyze_token_distribution(dataset, tokenizer, num_samples=1000)
+        
+        # 7. Test with model
         test_with_model(dataset, batch_size=2)
         
-        # Final report
+        # Final report with new results
         print("\n" + "=" * 70)
-        print("📋 FINAL VALIDATION REPORT")
+        print("📋 COMPREHENSIVE VALIDATION REPORT")
         print("=" * 70)
         
         all_valid = True
+        critical_issues = []
+        
+        # Existing validations
         for component, results in validation_results.items():
             status = "✅ PASS" if results['valid'] else "❌ FAIL"
             print(f"{component.upper()}: {status}")
@@ -678,17 +926,56 @@ def main():
                 for issue in results['issues']:
                     print(f"  - {issue}")
         
+        # New EOS analysis results
+        print(f"\nEOS CHUNK ANALYSIS:")
+        if eos_analysis['early_eos_percentage'] > 15:
+            print(f"❌ CRITICAL: {eos_analysis['early_eos_percentage']:.1f}% sequences have misplaced EOS")
+            critical_issues.append("Severe EOS placement issues detected")
+            all_valid = False
+        elif eos_analysis['early_eos_percentage'] > 5:
+            print(f"⚠️  WARNING: {eos_analysis['early_eos_percentage']:.1f}% sequences have misplaced EOS")
+        else:
+            print(f"✅ PASS: Only {eos_analysis['early_eos_percentage']:.1f}% sequences have misplaced EOS")
+        
+        # Token distribution analysis results
+        print(f"\nTOKEN DISTRIBUTION ANALYSIS:")
+        if len(distribution_analysis['top_tokens']) > 0:
+            top_token_pct = (distribution_analysis['top_tokens'][0][1] / distribution_analysis['total_tokens']) * 100
+            if top_token_pct > 15:
+                print(f"❌ CRITICAL: Extreme token bias detected ({top_token_pct:.1f}%)")
+                critical_issues.append("Extreme token frequency bias")
+                all_valid = False
+            elif top_token_pct > 8:
+                print(f"⚠️  WARNING: High token bias detected ({top_token_pct:.1f}%)")
+            else:
+                print(f"✅ PASS: Token distribution is reasonable ({top_token_pct:.1f}%)")
+        
         print("\n" + "-" * 70)
-        if all_valid:
+        if all_valid and len(critical_issues) == 0:
             print("🎉 ALL VALIDATIONS PASSED!")
             print("Your data is ready for training with DistilGPT2!")
             print("💾 Memory optimization: Using int16 for tokens and "
                   "bool for attention masks")
             print("🔧 Model updated: Now properly handles padding masks "
                   "combined with causal masks")
+        elif len(critical_issues) > 0:
+            print("🚨 CRITICAL ISSUES DETECTED!")
+            print("❌ DO NOT USE THIS DATA FOR TRAINING!")
+            print("\nCritical issues found:")
+            for issue in critical_issues:
+                print(f"  • {issue}")
+            print(f"\n💡 Required Actions:")
+            print(f"  1. Fix tokenizer script indentation bug")
+            print(f"  2. Re-tokenize all data with corrected script")  
+            print(f"  3. Re-run validation to confirm fixes")
+            print(f"  4. Only then proceed with model training")
         else:
-            print("⚠️  SOME VALIDATIONS FAILED!")
+            print("⚠️  SOME ISSUES DETECTED!")
             print("Please address the issues above before training.")
+            print("💾 Memory optimization: Using int16 for tokens and "
+                  "bool for attention masks")
+            print("🔧 Model updated: Now properly handles padding masks "
+                  "combined with causal masks")
             
             # Provide specific guidance for common issues
             has_padding_issues = any(
