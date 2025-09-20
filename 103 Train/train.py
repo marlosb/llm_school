@@ -199,8 +199,8 @@ def train_model(model, args, checkpoint=None):
 
             # Epoch summary
             log_and_print(
-                f" Epoch {epoch+1} done. Avg Loss: {avg_loss:.4f}, "
-                f"Batch time: {batch_time_str}, "
+                f" Epoch {epoch+1} done. "
+                f"Batch {batch_info['current_batch']} time: {batch_time_str}, "
                 f"Total time: {total_time_str}"
             )
                     
