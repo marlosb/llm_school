@@ -368,6 +368,14 @@ def main():
     
     # Parse arguments
     args = parse_training_args()
+
+    # Setup logging FIRST - before any log_and_print calls
+    logging.basicConfig(
+        filename=args.log_file,
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        filemode='w'  # Start with a fresh log file
+    )
     
     # Print configuration
     print_args(args)
