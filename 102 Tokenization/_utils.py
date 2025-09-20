@@ -18,9 +18,21 @@ def parse_arguments():
                         help='Column name containing text data \
                              (default: text)')
     
+    parser.add_argument('--label-column', type=str, default=None,
+                        help='Column name for label filtering \
+                             (default: None - no filtering)')
+    
+    parser.add_argument('--label-filter-value', type=int, default=None,
+                        help='Label value to filter by \
+                             (default: None - no filtering)')
+    
     parser.add_argument('--cache-dir', type=str, default='../data',
                         help='Directory to cache dataset \
                               (default: ../data)')
+    
+    parser.add_argument('--max-samples', type=int, default=None,
+                        help='Maximum number of samples to process \
+                             (default: None - process all samples)')
     
     # Tokenizer arguments
     parser.add_argument('--tokenizer-path', type=str, 
