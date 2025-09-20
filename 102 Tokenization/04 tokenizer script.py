@@ -1,46 +1,72 @@
 import datetime
 from multiprocess import Process, Queue
-import os 
+import os
+import time
+from typing import Iterator, List
 
 from datasets import load_dataset
-import h5py
 import numpy as np
 from pathlib import Path
 from transformers import PreTrainedTokenizerFast
 from torch.utils.data import DataLoader
-import torch
 
 from _utils import parse_arguments
 
 def now() -> str:
     return datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-def import_data(dataset_name:str='TucanoBR/GigaVerbo', 
-                dataset_split:str='train[:10]',
-                text_column:str='text',
-                cache_dir:str='../data',
-                batch_size:int=100000,
-                ):
+def stream_dataset(dataset_name: str = 'TucanoBR/GigaVerbo', 
+                   dataset_split: str = 'train',
+                   text_column: str = 'text',
+                   cache_dir: str = '../data',
+                   batch_size: int = 100000,
+                   label_column: str = None,
+                   label_filter_value: int = None,
+                   max_samples: int = None,
+                   ) -> Iterator[List[str]]:
+    """
+    Stream dataset in batches without loading everything into memory
+    """
     
+    # Load dataset in streaming mode
     dataset = load_dataset(dataset_name, 
-                           split=dataset_split, 
-                           cache_dir=cache_dir)
-    print(f"{now()}: Dataset {dataset_name} loaded with {len(dataset)} samples")
+                          split=dataset_split, 
+                          cache_dir=cache_dir,
+                          streaming=True)
     
-    # Create collate function
-    def collate_fn(batch):
-        return [item[text_column] for item in batch]
+    print(f"{now()}: Dataset {dataset_name} loaded in streaming mode")
     
-    return DataLoader(
-            dataset, 
-            batch_size=batch_size, 
-            shuffle=False,
-            collate_fn=collate_fn)
+    # Filter dataset by label if specified
+    if label_column and label_filter_value is not None:
+        dataset = dataset.filter(lambda example: example[label_column] == label_filter_value)
+        print(f"{now()}: Applied label filter: {label_column}={label_filter_value}")
+
+    batch = []
+    total_processed = 0
+
+    for sample in dataset:
+        # Check if we've reached the maximum number of samples
+        if max_samples and total_processed >= max_samples:
+            print(f"{now()}: Reached maximum samples limit: {max_samples}")
+            break
+            
+        batch.append(sample[text_column])
+        total_processed += 1
+        
+        # Yield batch when it reaches the specified size
+        if len(batch) >= batch_size:
+            print(f"{now()}: Yielding batch of {len(batch)} samples (total processed: {total_processed})")
+            yield batch
+            batch = []
+    
+    # Yield remaining samples if any
+    if batch:
+        print(f"{now()}: Yielding final batch of {len(batch)} samples (total processed: {total_processed})")
+        yield batch    
 
 def parallel_tokenize(worker_id: int,
                       input_queue:Queue, 
                       output_path: str,
-                      total_batches: int,
                       tokenizer_path: str = '../models/30k.json', 
                       max_length: int = 512
                   ) -> None:
@@ -83,7 +109,7 @@ def parallel_tokenize(worker_id: int,
                 input_ids_list = [input_ids_list]
                 attention_mask_list = [attention_mask_list]
                 
-            # Process chunks and add EOS only to the last one (INDENTED CORRECTLY!)
+            # Process chunks and add EOS only to the last one
             for chunk_idx, (chunk_ids, chunk_mask) in enumerate(zip(input_ids_list, attention_mask_list)):
                 is_last_chunk = (chunk_idx == len(input_ids_list) - 1)
                 
@@ -119,8 +145,7 @@ def parallel_tokenize(worker_id: int,
     def save_batch(token_sequences,
                    attention_masks, 
                    output_path: str, 
-                   batch_id: int, 
-                   total_batches: int):
+                   batch_id: int):
         """
         Save BatchEncoding as NPZ file - efficient for NumPy arrays
         """
@@ -128,7 +153,7 @@ def parallel_tokenize(worker_id: int,
         Path(output_path).mkdir(parents=True, exist_ok=True)
 
         # Save as .npz file
-        filename = f"tokenized_{batch_id + 1}_of_{total_batches}.npz"
+        filename = f"tokenized_batch_{batch_id}.npz"
         filepath = os.path.join(output_path, filename)
 
         np.savez_compressed(filepath, 
@@ -140,12 +165,14 @@ def parallel_tokenize(worker_id: int,
                       f"to {filepath} ({file_size:.2f} MB)")
         print(''.join(print_text))
 
+    batch_count = 0
     while True:
         queue_item = input_queue.get()
     
         if queue_item is None:  # Sentinel value to signal termination
-            print(f"{now()}: Worker {worker_id} terminating")
+            print(f"{now()}: Worker {worker_id} terminating after processing {batch_count} batches")
             break
+
         batch_id, text_batch = queue_item
         print(f"{now()}: Worker {worker_id} processing batch id {batch_id}")
         tokenized_sequences, attention_masks = tokenize_batch(text_batch, 
@@ -153,50 +180,120 @@ def parallel_tokenize(worker_id: int,
         save_batch(tokenized_sequences, 
                    attention_masks,
                    output_path, 
-                   batch_id=batch_id, 
-                   total_batches=total_batches)
+                   batch_id=batch_id)
+        batch_count += 1
 
+def producer_process(dataset_name: str,
+                    dataset_split: str,
+                    text_column: str,
+                    cache_dir: str,
+                    batch_size: int,
+                    label_column: str,
+                    label_filter_value: int,
+                    max_samples: int,
+                    input_queue: Queue, 
+                    max_queue_size: int,
+                    num_workers: int) -> None:
+    """
+    Producer process that creates dataset stream and feeds batches to the queue
+    """
+    print(f"{now()}: Producer process started")
+    
+    # Create dataset stream within the producer process
+    dataset_stream = stream_dataset(
+        dataset_name=dataset_name,
+        dataset_split=dataset_split,
+        text_column=text_column,
+        cache_dir=cache_dir,
+        batch_size=batch_size,
+        label_column=label_column,
+        label_filter_value=label_filter_value,
+        max_samples=max_samples
+    )
+    
+    batch_id = 0
+    
+    try:
+        for batch in dataset_stream:
+            # Wait if queue is full (non-blocking approach)
+            while input_queue.qsize() >= max_queue_size:
+                print(f"{now()}: Queue full ({input_queue.qsize()}/{max_queue_size}), waiting...")
+                time.sleep(0.1)
+            
+            print(f"{now()}: Adding batch {batch_id} to queue (queue size: {input_queue.qsize()})")
+            input_queue.put((batch_id, batch))
+            batch_id += 1
+    
+    except Exception as e:
+        print(f"{now()}: Error in producer process: {e}")
+        raise
+    
+    finally:
+        # Add sentinel values to signal workers to terminate
+        print(f"{now()}: Finished streaming data. Adding sentinel values for {num_workers} workers")
+        for _ in range(num_workers):
+            input_queue.put(None)
+        
+        print(f"{now()}: Producer finished. Total batches: {batch_id}")
 
 if __name__ == "__main__":
     # Parse command line arguments
     args = parse_arguments()
 
-    input_queue = Queue()
-    print(f'{now()}: Input queue created')
+    # Create bounded queue - size should be manageable but allow some buffering
+    max_queue_size = args.num_workers * 2  # Allow 2 batches per worker in queue
+    input_queue = Queue(maxsize=max_queue_size)
+    print(f'{now()}: Input queue created with max size: {max_queue_size}')
 
-    dataLoader = import_data(dataset_name=args.dataset_name,
-                             dataset_split=args.dataset_split,
-                             text_column=args.text_column,
-                             cache_dir=args.cache_dir,
-                             batch_size=args.batch_size
-                             )
-    total_batches = len(dataLoader)
+    label_column = getattr(args, 'label_column', None)
+    label_filter_value = getattr(args, 'label_filter_value', None)
+    max_samples = getattr(args, 'max_samples', None)
 
-    for batch_id, batch_text in enumerate(dataLoader):
-        print(f"{now()}: Enqueuing batch {batch_id} of size {len(batch_text)}")
-        input_queue.put((batch_id, batch_text))
-    
+    # Start worker processes
     workers = []
     for worker_id in range(args.num_workers):
-        # Add sentinel values (one per consumer) to signal exit
-        input_queue.put(None)
-        # Start worker processes
         p = Process(target=parallel_tokenize, args=(worker_id, 
                                                     input_queue, 
                                                     args.output_path,
-                                                    total_batches,
                                                     args.tokenizer_path,
                                                     args.max_length))
         p.start()
         workers.append(p)
+    
+    print(f"{now()}: Started {args.num_workers} worker processes")
+
+    # Start producer process with individual arguments instead of generator
+    producer = Process(target=producer_process, args=(
+        args.dataset_name,
+        args.dataset_split,
+        args.text_column,
+        args.cache_dir,
+        args.batch_size,
+        label_column,
+        label_filter_value,
+        max_samples,
+        input_queue,
+        max_queue_size,
+        args.num_workers
+    ))
+    producer.start()
+    
+    print(f"{now()}: Started producer process")
+
+    # Wait for producer to complete
+    producer.join()
+    print(f"{now()}: Producer process completed")
 
     # Wait for all workers to complete
-    for worker in workers:
+    for i, worker in enumerate(workers):
         worker.join()
-    print(f"{now()}: All workers completed successfully!")
+        print(f"{now()}: Worker {i} completed")
+    
+    print(f"{now()}: All processes completed successfully!")
 
 # how to run the script:
 # python "04 tokenizer script.py" --dataset-name "TucanoBR/tucano-sft" 
-#        --dataset-split "train[:100]" --tokenizer-path "../models/30k/" 
-#        --max-length 1024 --batch-size 25000 --num-workers 8 
-#        --output-path "../data/custom_tokenized/"
+#        --dataset-split "train" --tokenizer-path "../models/30k/" 
+#        --max-length 512 --batch-size 25000 --num-workers 8 
+#        --output-path "../data/custom_tokenized/" --label-column "label" 
+#        --label-filter-value 1 --max-samples 1000000
