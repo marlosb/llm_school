@@ -30,7 +30,7 @@ import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
 
-from arg_utils import parse_training_args
+from z_utils import parse_training_args
 from b_model import GPTConfig, DistilGPT2
 
 args = parse_training_args()
