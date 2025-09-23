@@ -145,18 +145,19 @@ if os.path.exists(meta_path):
     meta_vocab_size = meta['vocab_size']
     print(f"found vocab_size = {meta_vocab_size} (inside {meta_path})")
 
-# model init
-model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=block_size,
-                  bias=bias, vocab_size=None, dropout=dropout) # start with model_args from command line
 if init_from == 'scratch':
     # init a new model from scratch
     print("Initializing a new model from scratch")
     # determine the vocab size we'll use for from-scratch training
     if meta_vocab_size is None:
-        print("defaulting to vocab_size of GPT-2 to 50304 (50257 rounded up for efficiency)")
-    model_args['vocab_size'] = meta_vocab_size if meta_vocab_size is not None else 30000
-    gptconf = GPTConfig(**model_args)
-    model = DistilGPT2(gptconf)
+        print("defaulting to vocab_size of GPT-2 to 30000 (50257 rounded up for efficiency)")
+    vocab_size = meta_vocab_size if meta_vocab_size is not None else 30000
+    model = DistilGPT2( vocab_size=vocab_size, 
+                        max_position=512, 
+                        embed_dim=n_embd, 
+                        num_layers=n_layer, 
+                        num_heads=n_head, 
+                        dropout=dropout)
 elif init_from == 'resume':
     print(f"Resuming training from {out_dir}")
     # resume training from a checkpoint.
