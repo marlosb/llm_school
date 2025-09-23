@@ -98,7 +98,10 @@ class DistilGPT2(nn.Module):
                  dropout=0.1, 
                  block_size=512):
         super().__init__()
-
+        
+        self.n_layer = num_layers
+        self.n_head = num_heads
+        self.n_embd = embed_dim 
         self.block_size = block_size
         self.transformer = nn.ModuleDict({
             'wte': nn.Embedding(vocab_size, embed_dim),
@@ -143,8 +146,7 @@ class DistilGPT2(nn.Module):
         # first estimate the number of flops we do per iteration.
         # see PaLM paper Appendix B as ref: https://arxiv.org/abs/2204.02311
         N = self.get_num_params()
-        cfg = self.config
-        L, H, Q, T = cfg.n_layer, cfg.n_head, cfg.n_embd//cfg.n_head, cfg.block_size
+        L, H, Q, T = self.n_layer, self.n_head, self.n_embd//self.n_head, self.block_size
         flops_per_token = 6*N + 12*L*H*Q*T
         flops_per_fwdbwd = flops_per_token * T
         flops_per_iter = flops_per_fwdbwd * fwdbwd_per_iter
