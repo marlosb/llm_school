@@ -47,8 +47,8 @@ always_save_checkpoint = True # if True, always save a checkpoint after each eva
 init_from = 'scratch' # 'scratch' or 'resume' or 'gpt2*'
 # data
 dataset = args.data_dir
-gradient_accumulation_steps = 5 * 8 # used to simulate larger batch sizes
-batch_size = 30 # if gradient_accumulation_steps > 1, this is the micro-batch size
+gradient_accumulation_steps = 8 * 8 # used to simulate larger batch sizes
+batch_size = 32 # if gradient_accumulation_steps > 1, this is the micro-batch size
 block_size = 512
 # model
 n_layer = 6
