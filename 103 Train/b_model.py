@@ -138,7 +138,7 @@ class DistilGPT2(nn.Module):
 
         return optimizer
 
-    def forward(self, input_ids, attention_mask=None):
+    def forward(self, input_ids, targets=None):
         batch_size, seq_len = input_ids.size()
         max_pos = self.transformer.wpe.num_embeddings
         assert seq_len <= max_pos, \
@@ -153,39 +153,28 @@ class DistilGPT2(nn.Module):
         position_embeds = self.transformer.wpe(position_ids)
         x = self.transformer.drop(token_embeds + position_embeds)
         
-        # Create proper attention mask
-        if attention_mask is not None:
-            # Convert padding mask [batch_size, seq_len] to 4D attention mask
-            # First create causal mask
-            causal_mask = torch.tril(torch.ones(seq_len, 
-                                                seq_len, 
-                                                device=device))
-            causal_mask = causal_mask.view(1, 1, seq_len, seq_len)
-            
-            # Convert attention_mask to the 
-            # right shape: [batch_size, 1, 1, seq_len]
-            # where 1 indicates valid token, 0 indicates padding
-            extended_attention_mask = attention_mask[:, None, None, :]
-            
-            # Combine causal mask with padding mask
-            # We want to mask out both future tokens AND padding tokens
-            combined_mask = causal_mask * extended_attention_mask
-            attention_mask = combined_mask
-        else:
-            # Default causal attention mask
-            causal_mask = torch.tril(torch.ones(seq_len, 
-                                                seq_len, 
-                                                device=device))
-            causal_mask = causal_mask.view(1, 1, seq_len, seq_len)
-                
-            # Transformer blocks
-            for block in self.transformer.h:
-                x = block(x, attention_mask)
+        # Create causal mask
+        causal_mask = torch.tril(torch.ones(seq_len, seq_len, device=device)).view(1, 1, seq_len, seq_len)
         
-        # Final layer norm and output
+        # Transformer blocks
+        for block in self.transformer.h:
+            x = block(x, causal_mask)
+        
         x = self.transformer.ln_f(x)
         logits = self.lm_head(x)
-        return logits
+        
+        loss = None
+        if targets is not None:
+            # Shift so that tokens < n predict n
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = targets[..., 1:].contiguous()
+            # Flatten the tokens
+            loss_fct = torch.nn.CrossEntropyLoss()
+            shift_logits = shift_logits.view(-1, shift_logits.size(-1))
+            shift_labels = shift_labels.view(-1)
+            loss = loss_fct(shift_logits, shift_labels)
+        
+        return logits, loss
     
 @dataclass
 class GPTConfig:
