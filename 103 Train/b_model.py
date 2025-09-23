@@ -94,8 +94,11 @@ class DistilGPT2(nn.Module):
                  embed_dim=768, 
                  num_layers=6, 
                  num_heads=12, 
-                 dropout=0.1):
+                 dropout=0.1, 
+                 block_size=512):
         super().__init__()
+        
+        self.block_size = block_size
         self.transformer = nn.ModuleDict({
             'wte': nn.Embedding(vocab_size, embed_dim),
             'wpe': nn.Embedding(max_position, embed_dim),
