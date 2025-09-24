@@ -39,7 +39,7 @@ args = parse_training_args()
 # default config values designed to train a gpt2 (124M) on OpenWebText
 # I/O
 out_dir = args.out_dir
-eval_interval = 600
+eval_interval = 200
 log_interval = 1
 eval_iters = 10
 eval_only = False # if True, script exits right after the first eval
@@ -58,15 +58,15 @@ dropout = 0.1 # for pretraining 0 is good, for finetuning try 0.1+
 bias = False # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
 learning_rate = 1e-4 # max learning rate
-max_iters = 61000 # total number of training iterations
+max_iters = 17800 # total number of training iterations
 weight_decay = 1e-1
 beta1 = 0.9
 beta2 = 0.95
 grad_clip = 1.0 # clip gradients at this value, or disable if == 0.0
 # learning rate decay settings
 decay_lr = True # whether to decay the learning rate
-warmup_iters = 600 # how many steps to warm up for
-lr_decay_iters = 61000 # should be ~= max_iters per Chinchilla
+warmup_iters = 200 # how many steps to warm up for
+lr_decay_iters = 17800 # should be ~= max_iters per Chinchilla
 min_lr = 1e-5 # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
 # DDP settings
 backend = 'nccl' # 'nccl', 'gloo', etc.
